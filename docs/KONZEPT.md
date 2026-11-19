@@ -208,6 +208,31 @@ Danach braucht die App kein Internet mehr. Eigene Modelldateien können auch man
 
 ---
 
+### 5.3 Akku-Strategie: keine Live-Transkription
+Vergleich: Cloud-Wearables wie Omi streamen live zum Handy und in die Cloud – genau das kostet laut deren eigenem
+Support am meisten Akku, Nutzer wünschen sich dort ausdrücklich einen Batch-Modus. Andere Geräte (z. B. Plaud) setzen
+auf bewusst gestartete Aufnahmen statt Dauerbetrieb. open2ndbrain kombiniert Dauerbetrieb mit Batch-Verarbeitung:
+
+1. **Während der Aufnahme läuft nur, was billig ist:** Mikrofon lesen, energiebasierte Sprachaktivitätserkennung,
+   Opus-Kodierung (Hardware/optimierter Systemcodec). Kein neuronales Netz im Dauerbetrieb.
+2. **Transkription in Stapeln**, nie live: erst wenn eine Stundendatei abgeschlossen ist, dann am Stück mit voll
+   ausgelasteten Kernen (kurz und effizient statt dauerhaft „ein bisschen“). Modelle werden nur für den Stapel geladen
+   und danach freigegeben (~1 GB RAM).
+3. **Modus „Nur beim Laden“**: alles über Nacht am Ladegerät – tagsüber praktisch kein Zusatzverbrauch.
+   Standard „Automatisch“ verarbeitet sofort, aber nicht bei niedrigem Akku.
+4. Gemessen am Entwicklungsrechner: Echtzeitfaktor 0,055 → 1 h Sprache ≈ 3–4 min Rechenzeit, auf dem Handy grob 10–15 min.
+   Bei typisch 2–5 h Sprache pro Tag sind das 30–75 min Rechenzeit pro Tag, gebündelt.
+5. **Ausnahme Meetings:** Ein markiertes Meeting wird nach dem Ende sofort (vorrangig) transkribiert – dafür wird die
+   laufende Stundendatei beim Meeting-Ende vorzeitig abgeschlossen.
+
+### 5.4 Markierungen: Meetings und Lesezeichen
+Die 24/7-Aufnahme läuft immer weiter; Markierungen sind nur Zeitangaben darüber (`markers.json`):
+- **Meeting starten/beenden** – im Aufnahme-Tab, in der Benachrichtigung und über eine eigene Schnelleinstellungs-Kachel.
+  Meetings erscheinen als eigene Einträge (Titel, von–bis) mit allen Äußerungen aus dem Zeitraum, dateiübergreifend;
+  ab Phase 4 mit automatischer Zusammenfassung und To-dos.
+- **Merken** (Lesezeichen) – ein Tippen markiert die letzten 30 Sekunden als wichtig.
+- Benachrichtigungs-Aktionen (Android erlaubt drei): **Meeting · Pause 15 min · Pause/Fortsetzen**; Stopp in der App.
+
 ## 6. Second-Brain-Index
 
 ### 6.1 Datenmodell (Room)
