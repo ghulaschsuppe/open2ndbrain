@@ -1,4 +1,151 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">open2ndbrain</string>
+
+    <!-- Allgemein -->
+    <string name="close">Schließen</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="delete">Löschen</string>
+    <string name="open_app_settings">App-Einstellungen öffnen</string>
+
+    <!-- Navigation -->
+    <string name="tab_record">Aufnahme</string>
+    <string name="tab_recordings">Aufnahmen</string>
+    <string name="tab_settings">Einstellungen</string>
+
+    <!-- Status (Benachrichtigung, Kachel, UI) -->
+    <string name="status_off">Aufnahme aus</string>
+    <string name="status_starting">Aufnahme wird gestartet …</string>
+    <string name="status_recording">Nimmt auf</string>
+    <string name="status_paused">Pausiert</string>
+    <string name="status_paused_until">Pausiert bis %1$s</string>
+    <string name="status_mic_busy">Mikrofon von anderer App belegt</string>
+    <string name="status_error">Aufnahmefehler</string>
+    <string name="status_stopping">Aufnahme wird beendet …</string>
+
+    <!-- Aktionen -->
+    <string name="action_pause">Pause</string>
+    <string name="action_pause_15">Pause 15 min</string>
+    <string name="action_resume">Fortsetzen</string>
+    <string name="action_stop">Stopp</string>
+
+    <!-- Benachrichtigungen -->
+    <string name="channel_recording_name">Laufende Aufnahme</string>
+    <string name="channel_recording_desc">Dauerhafte Anzeige, solange aufgenommen wird – mit Pause und Stopp.</string>
+    <string name="channel_alerts_name">Hinweise</string>
+    <string name="channel_alerts_desc">Erinnerung, die Aufnahme nach einem Neustart fortzusetzen.</string>
+    <string name="notif_stored_today">Heute gespeichert: %1$s</string>
+    <string name="notif_mic_busy_text">Die Aufnahme geht automatisch weiter, sobald das Mikrofon frei ist.</string>
+    <string name="notif_paused_text">Nichts wird aufgenommen. Tippe auf „Fortsetzen“, um weiterzumachen.</string>
+    <string name="notif_error_text">Die Aufnahme ist gestört. Öffne die App für Details.</string>
+    <string name="notif_resume_title">Aufnahme fortsetzen – antippen</string>
+    <string name="notif_resume_text">Android erlaubt den Start des Mikrofons nur, wenn du die App kurz öffnest.</string>
+
+    <!-- Kachel -->
+    <string name="tile_label">Aufnahme</string>
+    <string name="tile_mic_busy">Mikrofon belegt</string>
+
+    <!-- Aufnahme-Tab -->
+    <string name="record_start">Aufnahme starten</string>
+    <string name="record_stop">Aufnahme beenden</string>
+    <string name="record_off_hint">Tippe auf den Knopf, um die Aufnahme zu starten.</string>
+    <string name="record_running_since">Läuft seit %1$s</string>
+    <string name="record_start_failed">Die Aufnahme konnte nicht gestartet werden. Bitte versuche es erneut, solange die App geöffnet ist.</string>
+    <string name="record_mic_denied">Ohne Mikrofon-Berechtigung kann nicht aufgenommen werden.</string>
+    <string name="record_level">Pegel</string>
+    <string name="record_speech_detected">Sprache erkannt</string>
+    <string name="record_no_speech">Keine Sprache</string>
+    <string name="record_mic_none">Kein Mikrofon aktiv</string>
+    <string name="record_mic_preference">Bevorzugt: %1$s</string>
+    <string name="record_mic_choose">Wählen</string>
+    <string name="record_mic_dialog_title">Mikrofon</string>
+    <string name="record_mic_dialog_hint">Verbundene Geräte erscheinen hier, solange die Aufnahme läuft.</string>
+    <string name="record_mic_sco_hint">Hinweis: Während ein Bluetooth-Mikrofon aktiv ist, läuft Musik über das Headset nur in Telefonqualität. Wer das nicht möchte, wählt „Immer intern“.</string>
+    <string name="record_stored_today">Heute gespeicherte Sprache: %1$s</string>
+    <string name="record_storage">Aufnahmen: %1$s · frei auf dem Gerät: %2$s</string>
+    <string name="record_storage_low">Wenig freier Speicher (unter 2 GB).</string>
+    <string name="mic_pref_auto">Automatisch</string>
+    <string name="mic_pref_builtin">Immer intern</string>
+
+    <!-- Aufnahmen-Tab -->
+    <string name="recordings_empty">Noch keine Aufnahmen. Starte die Aufnahme im Tab „Aufnahme“.</string>
+    <string name="recordings_part">Teil %1$d</string>
+    <string name="recordings_running">läuft</string>
+    <string name="recordings_delete_title">Aufnahme löschen?</string>
+    <string name="recordings_delete_text">Die Aufnahme %1$s (%2$s) wird endgültig gelöscht.</string>
+    <string name="day_today">Heute</string>
+    <string name="day_yesterday">Gestern</string>
+    <string name="player_play">Abspielen</string>
+    <string name="player_pause">Anhalten</string>
+    <string name="player_error">Diese Datei kann nicht abgespielt werden.</string>
+
+    <!-- Einstellungen -->
+    <string name="settings_section_recording">Aufnahme</string>
+    <string name="settings_section_storage">Speicher</string>
+    <string name="settings_section_battery">Akku</string>
+    <string name="settings_section_about">Über die App</string>
+    <string name="settings_bitrate">Qualität</string>
+    <string name="settings_bitrate_16">16 kbit/s – Standard</string>
+    <string name="settings_bitrate_16_desc">Gute Sprachqualität, ca. 6,8 MB pro Stunde Sprache</string>
+    <string name="settings_bitrate_12">12 kbit/s – Sparmodus</string>
+    <string name="settings_bitrate_12_desc">Noch gut verständlich, ca. 5,1 MB pro Stunde Sprache</string>
+    <string name="settings_discard_silence">Stille verwerfen</string>
+    <string name="settings_discard_silence_desc">Nur Sprachabschnitte speichern (mit kurzem Vor- und Nachlauf). Spart viel Speicher.</string>
+    <string name="settings_mic">Bevorzugtes Mikrofon</string>
+    <string name="settings_mic_auto_desc">Bluetooth- oder kabelgebundenes Headset, sonst das eingebaute Mikrofon</string>
+    <string name="settings_mic_builtin_desc">Kein Bluetooth-Mikrofon, Musik über Kopfhörer bleibt in voller Qualität</string>
+    <string name="settings_mic_specific_desc">Dieses Gerät, sobald es verbunden ist</string>
+    <string name="settings_mic_specific_hint">Ein bestimmtes Gerät wählst du im Tab „Aufnahme“, während es verbunden ist.</string>
+    <string name="settings_retention">Audio aufbewahren</string>
+    <plurals name="settings_retention_days">
+        <item quantity="one">%1$d Tag</item>
+        <item quantity="other">%1$d Tage</item>
+    </plurals>
+    <string name="settings_retention_unlimited">Unbegrenzt</string>
+    <string name="settings_retention_hint">Ältere Aufnahmen werden einmal täglich automatisch gelöscht.</string>
+    <string name="settings_retention_confirm_title">Aufbewahrung verkürzen?</string>
+    <plurals name="settings_retention_confirm_text">
+        <item quantity="one">Aufnahmen, die älter als %1$d Tag sind, werden sofort und endgültig gelöscht.</item>
+        <item quantity="other">Aufnahmen, die älter als %1$d Tage sind, werden sofort und endgültig gelöscht.</item>
+    </plurals>
+    <string name="settings_retention_confirm_ok">Verkürzen</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_license">Lizenz: GNU AGPL-3.0-or-later. Freie Software ohne Gewährleistung.</string>
+    <string name="settings_source">Der vollständige Quelltext ist öffentlich auf GitHub verfügbar: github.com/ghulaschsuppe/open2ndbrain</string>
+    <string name="settings_privacy">Alle Aufnahmen bleiben ausschließlich auf diesem Gerät. Die App hat keinen Internetzugriff.</string>
+    <string name="legal_short">Nimm Gespräche nur mit dem Einverständnis aller Anwesenden auf (§ 201 StGB).</string>
+
+    <!-- Akku -->
+    <string name="battery_ok">Akku-Optimierung ist für die App ausgeschaltet.</string>
+    <string name="battery_not_ok">Akku-Optimierung ist aktiv – Android kann die Aufnahme beenden.</string>
+    <string name="battery_request">Ausnahme erlauben</string>
+    <string name="battery_open_settings">Akku-Einstellungen öffnen</string>
+    <string name="battery_vendor_title">Tipp für dein Gerät</string>
+    <string name="battery_vendor_more">Weitere Anleitungen je Hersteller findest du auf dontkillmyapp.com (im Browser öffnen).</string>
+    <string name="vendor_samsung">Samsung: Einstellungen › Akku › Hintergrundnutzungsgrenzen › „Nie in Standby versetzte Apps“ – open2ndbrain hinzufügen.</string>
+    <string name="vendor_xiaomi">Xiaomi/Redmi/POCO: In den App-Infos „Autostart“ einschalten und „Energiesparen“ auf „Keine Einschränkungen“ stellen. Zusätzlich die App in den letzten Apps sperren.</string>
+    <string name="vendor_huawei">Huawei/Honor: Einstellungen › Akku › App-Start › open2ndbrain auf „Manuell verwalten“ stellen und alle drei Schalter einschalten.</string>
+    <string name="vendor_oneplus">OnePlus/OPPO/realme: In den App-Infos unter Akku „Hintergrundaktivität erlauben“ bzw. „Nicht optimieren“ wählen und die App in den letzten Apps sperren.</string>
+    <string name="vendor_vivo">vivo/iQOO: Einstellungen › Akku › Hoher Hintergrund-Stromverbrauch › open2ndbrain erlauben; Autostart einschalten.</string>
+    <string name="vendor_generic">Manche Hersteller beenden Hintergrund-Apps zusätzlich. Prüfe in den App-Infos die Akku- und Autostart-Einstellungen.</string>
+
+    <!-- Einrichtung -->
+    <string name="onb_next">Weiter</string>
+    <string name="onb_allow">Erlauben</string>
+    <string name="onb_skip">Überspringen</string>
+    <string name="onb_later">Später</string>
+    <string name="onb_granted">Erlaubt</string>
+    <string name="onb_finish">Fertig</string>
+    <string name="onb_legal_title">Bevor es losgeht</string>
+    <string name="onb_legal_text">open2ndbrain nimmt durchgehend auf, was in deiner Nähe gesprochen wird. Die App ist als dein persönliches Gedächtnis gedacht.\n\nIn Deutschland ist es strafbar, das nicht öffentlich gesprochene Wort anderer ohne deren Einverständnis aufzunehmen (§ 201 StGB). Nimm deshalb nur auf, wenn alle Anwesenden einverstanden sind, und pausiere sonst – mit einem Tipp in der Benachrichtigung oder der Schnelleinstellungs-Kachel.</string>
+    <string name="onb_legal_privacy">Alle Aufnahmen bleiben auf diesem Gerät. Keine Cloud, kein Konto, kein Tracking.</string>
+    <string name="onb_legal_accept">Ich habe den Hinweis verstanden.</string>
+    <string name="onb_mic_title">Mikrofon</string>
+    <string name="onb_mic_text">Ohne Zugriff auf das Mikrofon kann die App nicht aufnehmen.</string>
+    <string name="onb_notif_title">Benachrichtigungen</string>
+    <string name="onb_notif_text">Solange aufgenommen wird, zeigt die App eine dauerhafte Benachrichtigung mit Pause und Stopp. Nach einem Neustart erinnert sie dich daran, die Aufnahme fortzusetzen.</string>
+    <string name="onb_bt_title">Bluetooth-Mikrofone (optional)</string>
+    <string name="onb_bt_text">Damit die App Headsets und Ohrhörer als Mikrofon nutzen und automatisch wechseln kann, braucht sie die Berechtigung „Geräte in der Nähe“.</string>
+    <string name="onb_battery_title">Im Hintergrund weiterlaufen</string>
+    <string name="onb_battery_text">Damit Android die Aufnahme nicht nach einiger Zeit beendet, nimm die App von der Akku-Optimierung aus.</string>
 </resources>
