@@ -28,9 +28,13 @@ class RecorderStatusHolder {
 /** Vereinfachter Gesamtstatus für Benachrichtigung, Kachel und UI. */
 enum class DisplayStatus { Off, Starting, Recording, Paused, MicBusy, Error, Stopping }
 
-fun displayStatus(engine: EngineState, service: ServiceStatus): DisplayStatus = when {
+/**
+ * @param pausedBySettings Nutzer hat pausiert (gespeichert), der Dienst läuft aber nicht – z. B. nach einem
+ *   Neustart unter Android 14+, wo der Dienst erst nach einem Antippen wieder starten darf. Dann „Pausiert“ statt „Aus“.
+ */
+fun displayStatus(engine: EngineState, service: ServiceStatus, pausedBySettings: Boolean = false): DisplayStatus = when {
     service.stopping -> DisplayStatus.Stopping
-    !service.running -> DisplayStatus.Off
+    !service.running -> if (pausedBySettings) DisplayStatus.Paused else DisplayStatus.Off
     service.pausedUntil != null -> DisplayStatus.Paused
     else -> when (engine.status) {
         EngineStatus.Recording -> DisplayStatus.Recording
@@ -71,3 +75,9 @@ data class NotificationModel(
         }
     }
 }
+
+/** Meldung der Engine bei vollem Speicher (Präfix; Antippen von „Fortsetzen“ hilft dann nicht). */
+const val ENGINE_MSG_STORAGE_FULL = "Speicher voll"
+
+fun isStorageFull(errorMessage: String?): Boolean =
+    errorMessage?.trim()?.startsWith(ENGINE_MSG_STORAGE_FULL, ignoreCase = true) == true

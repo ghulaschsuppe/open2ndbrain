@@ -16,9 +16,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -41,9 +43,9 @@ data class RecordUiState(
     val storedTodayMs: Long = 0,
     val storage: StorageInfo = StorageInfo(),
     val now: Long = System.currentTimeMillis(),
-) {
-    val serviceRunning: Boolean get() = status != DisplayStatus.Off && status != DisplayStatus.Stopping
-}
+    /** Dienst läuft im Vordergrund (Pause/Fortsetzen möglich); false auch bei gespeicherter Pause ohne Dienst. */
+    val serviceRunning: Boolean = false,
+)
 
 class RecordViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as O2bApp).container
@@ -55,22 +57,26 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private val storedToday = container.recordings.observeRecordings().map { list ->
+    /** Einmal geteiltes Einlesen der Aufnahmen für Tagesdauer und Speicherbedarf. */
+    private val recordings = container.recordings.observeRecordings()
+        .shareIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+
+    private val storedToday = recordings.map { list ->
         val zone = ZoneId.systemDefault()
         RecordingGrouping.storedMsOn(list, LocalDate.now(zone), zone)
     }
 
     private val storage = combine(
-        container.recordings.observeRecordings(),
+        recordings.map { list -> list.sumOf { it.sizeBytes } }.distinctUntilChanged(),
         flow {
             while (true) {
                 emit(Unit)
                 delay(60_000)
             }
         },
-    ) { _, _ ->
+    ) { recordingsBytes, _ ->
         StorageInfo(
-            recordingsBytes = container.recordings.totalSizeBytes(),
+            recordingsBytes = recordingsBytes,
             freeBytes = runCatching { StatFs(container.audioRoot.path).availableBytes }.getOrDefault(0),
         )
     }.flowOn(Dispatchers.IO)
@@ -82,15 +88,18 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     ) { engine, service, settings -> Triple(engine, service, settings) }
 
     val state: StateFlow<RecordUiState> = combine(base, storedToday, storage, clock) { (engine, service, settings), today, storage, now ->
+        // Nach einem Neustart (Android 14+) läuft der Dienst evtl. nicht, die Nutzer-Pause gilt aber weiter.
+        val pausedBySettings = !service.running && settings.recordingDesired && settings.isPausedAt(now)
         RecordUiState(
-            status = displayStatus(engine, service),
+            status = displayStatus(engine, service, pausedBySettings),
             engine = engine,
-            pausedUntil = service.pausedUntil,
+            pausedUntil = service.pausedUntil ?: settings.pausedUntilEpochMs.takeIf { pausedBySettings },
             micPreference = settings.micPreference,
             // Die Engine zählt live mit; die Dateien liefern den Wert, wenn sie nicht läuft.
             storedTodayMs = maxOf(engine.storedMsToday, today),
             storage = storage,
             now = now,
+            serviceRunning = service.running && !service.stopping,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RecordUiState())
 

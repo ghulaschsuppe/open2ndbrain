@@ -22,6 +22,8 @@
     <string name="status_mic_busy">Mikrofon von anderer App belegt</string>
     <string name="status_error">Aufnahmefehler</string>
     <string name="status_stopping">Aufnahme wird beendet …</string>
+    <string name="status_storage_full">Speicher voll</string>
+    <string name="storage_full_hint">Speicher voll – Aufnahmen löschen oder Aufbewahrung verkürzen.</string>
 
     <!-- Aktionen -->
     <string name="action_pause">Pause</string>
@@ -49,6 +51,7 @@
     <string name="record_start">Aufnahme starten</string>
     <string name="record_stop">Aufnahme beenden</string>
     <string name="record_off_hint">Tippe auf den Knopf, um die Aufnahme zu starten.</string>
+    <string name="record_paused_off_hint">Tippe auf den Knopf, um die Aufnahme fortzusetzen.</string>
     <string name="record_running_since">Läuft seit %1$s</string>
     <string name="record_start_failed">Die Aufnahme konnte nicht gestartet werden. Bitte versuche es erneut, solange die App geöffnet ist.</string>
     <string name="record_mic_denied">Ohne Mikrofon-Berechtigung kann nicht aufgenommen werden.</string>

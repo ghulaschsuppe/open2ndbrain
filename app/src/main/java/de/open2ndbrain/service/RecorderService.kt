@@ -20,18 +20,23 @@ import androidx.lifecycle.lifecycleScope
 import de.open2ndbrain.O2bApp
 import de.open2ndbrain.core.AppContainer
 import de.open2ndbrain.core.EngineConfig
+import de.open2ndbrain.core.EngineState
 import de.open2ndbrain.core.EngineStatus
 import de.open2ndbrain.core.RecordingEngine
 import de.open2ndbrain.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -65,6 +70,27 @@ class RecorderService : LifecycleService() {
     private var configSent: EngineConfig? = null
     private var lastModel = NotificationModel(DisplayStatus.Starting)
     private var wakeLock: PowerManager.WakeLock? = null
+    /** Hält die CPU während einer befristeten Pause wach, damit der Handler pünktlich fortsetzt. */
+    private var pauseWakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * Nur die für Dienst/Benachrichtigung/Kachel relevanten Engine-Felder (ohne 10-Hz-Pegel, Sprache, Geräteliste;
+     * Sprachdauer minutengenau). Die Filterung läuft auf Dispatchers.Default, der Main-Thread sieht nur Änderungen.
+     */
+    private val engineEssentials: SharedFlow<EngineState> by lazy {
+        engine.state
+            .map {
+                it.copy(
+                    level = 0f,
+                    speechActive = false,
+                    availableInputs = emptyList(),
+                    storedMsToday = it.storedMsToday / 60_000 * 60_000,
+                )
+            }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+            .shareIn(lifecycleScope, SharingStarted.Eagerly, replay = 1)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -82,9 +108,17 @@ class RecorderService : LifecycleService() {
         val action = intent?.action ?: ACTION_RESTORE
         val foregroundRequired = intent?.getBooleanExtra(EXTRA_FOREGROUND_START, false) == true
         // Nach startForegroundService() muss startForeground() sofort und synchron folgen.
-        if (foregroundRequired && !enterForeground()) {
-            onForegroundDenied(startId)
-            return START_NOT_STICKY
+        if (foregroundRequired) {
+            if (!inForeground) {
+                if (!enterForeground()) {
+                    onForegroundDenied(startId)
+                    return START_NOT_STICKY
+                }
+            } else if (action == ACTION_START && engine.state.value.status == EngineStatus.Error) {
+                // Nutzeraktion aus sichtbarer Activity bei Engine-Fehler (z. B. Mikrofon nach System-Neustart
+                // unter Android 11–13 stumm): Vordergrund neu betreten, damit die „while-in-use“-Freigabe gilt.
+                refreshForeground()
+            }
         }
         submit(action, startId)
         return START_STICKY
@@ -97,6 +131,7 @@ class RecorderService : LifecycleService() {
             engineStarted = false
         }
         releaseWakeLock()
+        releasePauseWakeLock()
         inForeground = false
         statusHolder.update { ServiceStatus() }
         super.onDestroy()
@@ -165,6 +200,7 @@ class RecorderService : LifecycleService() {
             return
         }
         statusHolder.update { it.copy(running = true, pausedUntil = null, stopping = false) }
+        releasePauseWakeLock()
         acquireWakeLock()
         when {
             engineStarted && enginePaused -> {
@@ -184,6 +220,7 @@ class RecorderService : LifecycleService() {
 
     private suspend fun pause(until: Long, startId: Int?) {
         container.settings.setPausedUntil(until)
+        RecorderNotifications.cancelResumePrompt(this)
         if (!inForeground) {
             // Es läuft keine Aufnahme in diesem Prozess – nur den Wunsch speichern.
             finishService(startId)
@@ -199,7 +236,13 @@ class RecorderService : LifecycleService() {
     private fun enterPausedState(until: Long) {
         releaseWakeLock()
         statusHolder.update { it.copy(running = true, pausedUntil = until, stopping = false) }
-        if (until == AppSettings.PAUSED_INDEFINITELY) cancelAutoResume() else scheduleAutoResume(until)
+        if (until == AppSettings.PAUSED_INDEFINITELY) {
+            releasePauseWakeLock()
+            cancelAutoResume()
+        } else {
+            acquirePauseWakeLock(until)
+            scheduleAutoResume(until)
+        }
     }
 
     private suspend fun autoResume(startId: Int?) {
@@ -217,6 +260,8 @@ class RecorderService : LifecycleService() {
 
     private suspend fun stopRecording(startId: Int?) {
         container.settings.setRecordingDesired(false)
+        RecorderNotifications.cancelResumePrompt(this)
+        RecorderNotifications.cancelStorageFull(this)
         cancelAutoResume()
         statusHolder.update { it.copy(stopping = true) }
         if (engineStarted) {
@@ -228,6 +273,7 @@ class RecorderService : LifecycleService() {
             withTimeoutOrNull(STOP_TIMEOUT_MS) { engine.state.first { it.status == EngineStatus.Idle } }
         }
         releaseWakeLock()
+        releasePauseWakeLock()
         finishService(startId)
     }
 
@@ -243,13 +289,8 @@ class RecorderService : LifecycleService() {
     private fun enterForeground(): Boolean {
         if (inForeground) return true
         val notification = RecorderNotifications.buildOngoing(this, lastModel)
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        } else {
-            0 // Android 10 kennt den Typ „microphone“ noch nicht.
-        }
         return try {
-            ServiceCompat.startForeground(this, RecorderNotifications.ID_RECORDING, notification, type)
+            ServiceCompat.startForeground(this, RecorderNotifications.ID_RECORDING, notification, foregroundType())
             inForeground = true
             statusHolder.update { it.copy(running = true) }
             true
@@ -264,6 +305,31 @@ class RecorderService : LifecycleService() {
         }
     }
 
+    /**
+     * Vordergrund erneut betreten (nur bei einer Nutzeraktion aus sichtbarer Activity). DETACH lässt die
+     * Benachrichtigung stehen; schlägt der neue Start fehl, wird der normale Weg noch einmal versucht.
+     */
+    private fun refreshForeground() {
+        val notification = RecorderNotifications.buildOngoing(this, lastModel)
+        try {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
+            inForeground = false
+            ServiceCompat.startForeground(this, RecorderNotifications.ID_RECORDING, notification, foregroundType())
+            inForeground = true
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Erneuter Vordergrundstart fehlgeschlagen", e)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Erneuter Vordergrundstart verweigert", e)
+        }
+        if (!inForeground && !enterForeground()) Log.w(TAG, "Dienst ist nicht mehr im Vordergrund")
+    }
+
+    private fun foregroundType(): Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    } else {
+        0 // Android 10 kennt den Typ „microphone“ noch nicht.
+    }
+
     private fun onForegroundDenied(startId: Int?) {
         lifecycleScope.launch {
             if (container.settings.current().recordingDesired) RecorderNotifications.showResumePrompt(this@RecorderService)
@@ -273,6 +339,7 @@ class RecorderService : LifecycleService() {
 
     private fun finishService(startId: Int?) {
         cancelAutoResume()
+        releasePauseWakeLock()
         if (inForeground) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             inForeground = false
@@ -330,7 +397,7 @@ class RecorderService : LifecycleService() {
             }
         }
         lifecycleScope.launch {
-            combine(engine.state, statusHolder.status, ticker) { e, s, now -> NotificationModel.from(e, s, now) }
+            combine(engineEssentials, statusHolder.status, ticker) { e, s, now -> NotificationModel.from(e, s, now) }
                 .distinctUntilChanged()
                 .conflate()
                 .collect { model ->
@@ -348,7 +415,7 @@ class RecorderService : LifecycleService() {
 
     private fun observeTile() {
         lifecycleScope.launch {
-            combine(engine.state, statusHolder.status) { e, s -> displayStatus(e, s) }
+            combine(engineEssentials, statusHolder.status) { e, s -> displayStatus(e, s) }
                 .distinctUntilChanged()
                 .collect { RecorderTileService.requestUpdate(this@RecorderService) }
         }
@@ -357,18 +424,25 @@ class RecorderService : LifecycleService() {
     /**
      * Hält ein Fehler (z. B. „Mikrofon im Hintergrund gesperrt“ unter Android 11–13 oder fehlende Berechtigung)
      * länger an, bitten wir per Benachrichtigung um ein Antippen: Der Start aus dem Vordergrund behebt das meist.
+     * Während einer Pause wird nichts gemeldet; bei „Speicher voll“ hilft Antippen nicht → eigener Hinweis.
      */
     private fun observePersistentError() {
         lifecycleScope.launch {
-            engine.state
-                .map { it.status == EngineStatus.Error }
+            combine(engineEssentials, statusHolder.status) { e, s ->
+                if (e.status == EngineStatus.Error && s.running && s.pausedUntil == null) e.errorMessage.orEmpty() else null
+            }
                 .distinctUntilChanged()
                 .collectLatest { error ->
-                    if (error) {
-                        delay(ERROR_PROMPT_DELAY_MS)
-                        if (inForeground) RecorderNotifications.showResumePrompt(this@RecorderService)
-                    } else {
+                    if (error == null) {
                         RecorderNotifications.cancelResumePrompt(this@RecorderService)
+                        RecorderNotifications.cancelStorageFull(this@RecorderService)
+                    } else if (isStorageFull(error)) {
+                        RecorderNotifications.cancelResumePrompt(this@RecorderService)
+                        RecorderNotifications.showStorageFull(this@RecorderService)
+                    } else {
+                        delay(ERROR_PROMPT_DELAY_MS)
+                        val paused = statusHolder.status.value.pausedUntil != null
+                        if (inForeground && !paused) RecorderNotifications.showResumePrompt(this@RecorderService)
                     }
                 }
         }
@@ -416,6 +490,20 @@ class RecorderService : LifecycleService() {
         wakeLock?.takeIf { it.isHeld }?.release()
     }
 
+    /** Wake-Lock mit Timeout (Pausenende + 1 min): Ohne Exakte-Alarm-Berechtigung endet die Pause so pünktlich. */
+    private fun acquirePauseWakeLock(until: Long) {
+        val lock = pauseWakeLock ?: getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "open2ndbrain:pause")
+            ?.apply { setReferenceCounted(false) }
+            ?.also { pauseWakeLock = it }
+        val timeout = (until - System.currentTimeMillis()).coerceAtLeast(0) + PAUSE_WAKE_MARGIN_MS
+        lock?.acquire(timeout)
+    }
+
+    private fun releasePauseWakeLock() {
+        pauseWakeLock?.takeIf { it.isHeld }?.release()
+    }
+
     companion object {
         private const val TAG = "RecorderService"
 
@@ -433,6 +521,7 @@ class RecorderService : LifecycleService() {
         const val PAUSE_SHORT_MS = 15 * 60_000L
         private const val STOP_TIMEOUT_MS = 5_000L
         private const val ERROR_PROMPT_DELAY_MS = 10_000L
+        private const val PAUSE_WAKE_MARGIN_MS = 60_000L
         private const val TICK_MS = 15_000L
         private const val NOTIFY_MIN_INTERVAL_MS = 1_000L
         private const val RETENTION_CHECK_MS = 60 * 60_000L

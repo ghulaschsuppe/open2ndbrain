@@ -22,6 +22,7 @@ import de.open2ndbrain.ui.StartRecordingActivity
 object RecorderNotifications {
     const val ID_RECORDING = 1
     const val ID_RESUME_PROMPT = 2
+    const val ID_STORAGE_FULL = 3
 
     private const val CHANNEL_RECORDING = "recording"
     private const val CHANNEL_ALERTS = "alerts"
@@ -100,8 +101,11 @@ object RecorderNotifications {
             }
             DisplayStatus.MicBusy -> context.getString(R.string.status_mic_busy) to context.getString(R.string.notif_mic_busy_text)
             DisplayStatus.Paused -> pausedTitle(context, model.pausedUntil) to context.getString(R.string.notif_paused_text)
-            DisplayStatus.Error -> context.getString(R.string.status_error) to
-                (model.errorMessage ?: context.getString(R.string.notif_error_text))
+            DisplayStatus.Error -> if (isStorageFull(model.errorMessage)) {
+                context.getString(R.string.status_storage_full) to context.getString(R.string.storage_full_hint)
+            } else {
+                context.getString(R.string.status_error) to (model.errorMessage ?: context.getString(R.string.notif_error_text))
+            }
             DisplayStatus.Starting -> context.getString(R.string.status_starting) to today
             DisplayStatus.Stopping -> context.getString(R.string.status_stopping) to ""
             DisplayStatus.Off -> context.getString(R.string.status_off) to ""
@@ -151,6 +155,27 @@ object RecorderNotifications {
     }
 
     fun cancelResumePrompt(context: Context) = NotificationManagerCompat.from(context).cancel(ID_RESUME_PROMPT)
+
+    /** „Speicher voll“: Antippen öffnet die App (Aufnahmen löschen / Aufbewahrung verkürzen). */
+    @SuppressLint("MissingPermission") // durch canPost() geprüft
+    fun showStorageFull(context: Context) {
+        ensureChannels(context)
+        if (!canPost(context)) return
+        val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_stat_recorder)
+            .setContentTitle(context.getString(R.string.status_storage_full))
+            .setContentText(context.getString(R.string.storage_full_hint))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(context.getString(R.string.storage_full_hint)))
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent(context))
+            .build()
+        NotificationManagerCompat.from(context).notify(ID_STORAGE_FULL, notification)
+    }
+
+    fun cancelStorageFull(context: Context) = NotificationManagerCompat.from(context).cancel(ID_STORAGE_FULL)
 
     private fun canPost(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

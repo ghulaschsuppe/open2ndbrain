@@ -9,7 +9,9 @@ import de.open2ndbrain.ui.VendorTip
 import de.open2ndbrain.ui.onboarding.OnboardingStep
 import de.open2ndbrain.ui.onboarding.onboardingSteps
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ServiceLogicTest {
@@ -25,6 +27,17 @@ class ServiceLogicTest {
         // Nutzer-Pause hat Vorrang vor dem Engine-Status
         assertEquals(DisplayStatus.Paused, displayStatus(EngineState(status = EngineStatus.Recording), running.copy(pausedUntil = 5)))
         assertEquals(DisplayStatus.Stopping, displayStatus(EngineState(), running.copy(stopping = true)))
+        // Gespeicherte Pause ohne laufenden Dienst (Neustart unter Android 14+)
+        assertEquals(DisplayStatus.Paused, displayStatus(EngineState(), ServiceStatus(), pausedBySettings = true))
+        assertEquals(DisplayStatus.Off, displayStatus(EngineState(), ServiceStatus(), pausedBySettings = false))
+    }
+
+    @Test
+    fun storageFullDetection() {
+        assertTrue(isStorageFull("Speicher voll"))
+        assertTrue(isStorageFull("Speicher voll – 120 MB frei"))
+        assertFalse(isStorageFull("Mikrofon im Hintergrund gesperrt"))
+        assertFalse(isStorageFull(null))
     }
 
     @Test

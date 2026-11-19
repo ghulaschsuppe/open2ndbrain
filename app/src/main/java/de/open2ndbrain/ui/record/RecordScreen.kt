@@ -69,6 +69,7 @@ import de.open2ndbrain.core.InputType
 import de.open2ndbrain.core.MicPreference
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderNotifications
+import de.open2ndbrain.service.isStorageFull
 import de.open2ndbrain.ui.Formatters
 import de.open2ndbrain.ui.SystemSettings
 
@@ -160,14 +161,21 @@ private fun StatusHeader(state: RecordUiState) {
         DisplayStatus.Recording -> stringResource(R.string.status_recording)
         DisplayStatus.Paused -> RecorderNotifications.pausedTitle(context, state.pausedUntil)
         DisplayStatus.MicBusy -> stringResource(R.string.status_mic_busy)
-        DisplayStatus.Error -> stringResource(R.string.status_error)
+        DisplayStatus.Error -> stringResource(
+            if (isStorageFull(state.engine.errorMessage)) R.string.status_storage_full else R.string.status_error,
+        )
         DisplayStatus.Stopping -> stringResource(R.string.status_stopping)
     }
     val subtitle = when (state.status) {
         DisplayStatus.Recording, DisplayStatus.MicBusy -> state.engine.sessionStartedAt?.let {
             stringResource(R.string.record_running_since, Formatters.duration(state.now - it))
         }
-        DisplayStatus.Error -> state.engine.errorMessage
+        DisplayStatus.Error -> if (isStorageFull(state.engine.errorMessage)) {
+            stringResource(R.string.storage_full_hint)
+        } else {
+            state.engine.errorMessage
+        }
+        DisplayStatus.Paused -> if (!state.serviceRunning) stringResource(R.string.record_paused_off_hint) else null
         DisplayStatus.Off -> stringResource(R.string.record_off_hint)
         else -> null
     }

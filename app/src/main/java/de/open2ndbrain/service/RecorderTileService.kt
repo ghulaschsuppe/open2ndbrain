@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 class RecorderTileService : TileService() {
     private var scope: CoroutineScope? = null
     private var current: DisplayStatus = DisplayStatus.Off
+    private var serviceRunning = false
 
     override fun onStartListening() {
         super.onStartListening()
@@ -34,10 +35,20 @@ class RecorderTileService : TileService() {
         scope?.cancel()
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also { s ->
             s.launch {
-                combine(container.recordingEngine.state, container.recorderStatus.status) { e, st -> displayStatus(e, st) }
+                combine(
+                    container.recordingEngine.state,
+                    container.recorderStatus.status,
+                    container.settings.settings,
+                ) { e, st, settings ->
+                    // Gespeicherte Nutzer-Pause ohne laufenden Dienst (z. B. nach Neustart): „Pausiert“ statt „Aus“.
+                    val pausedBySettings = !st.running && settings.recordingDesired &&
+                        settings.isPausedAt(System.currentTimeMillis())
+                    displayStatus(e, st, pausedBySettings) to st.running
+                }
                     .distinctUntilChanged()
-                    .collect { status ->
+                    .collect { (status, running) ->
                         current = status
+                        serviceRunning = running
                         render(status)
                     }
             }
@@ -56,7 +67,14 @@ class RecorderTileService : TileService() {
             // Pausieren geht bewusst auch auf dem Sperrbildschirm ohne Entsperren (Datenschutz: ein Tipp).
             DisplayStatus.Recording, DisplayStatus.MicBusy, DisplayStatus.Starting, DisplayStatus.Error ->
                 RecorderService.send(this, RecorderService.ACTION_PAUSE)
-            DisplayStatus.Paused -> RecorderService.send(this, RecorderService.ACTION_RESUME)
+            // Läuft der Dienst nicht (Pause nach Neustart), muss er aus einer sichtbaren Activity starten.
+            DisplayStatus.Paused -> if (serviceRunning) {
+                RecorderService.send(this, RecorderService.ACTION_RESUME)
+            } else if (isLocked) {
+                unlockAndRun { launchStart() }
+            } else {
+                launchStart()
+            }
             DisplayStatus.Off -> if (isLocked) unlockAndRun { launchStart() } else launchStart()
             DisplayStatus.Stopping -> Unit
         }
