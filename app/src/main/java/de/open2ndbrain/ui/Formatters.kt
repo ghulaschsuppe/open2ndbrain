@@ -78,6 +78,9 @@ object Formatters {
     /** Echtzeitfaktor „0,15×“. */
     fun realTimeFactor(rtf: Float): String = String.format(GERMAN, "%.2f×", rtf)
 
+    /** Kurze Dauer mit einer Nachkommastelle: „3,2 s“. */
+    fun seconds(ms: Long): String = String.format(GERMAN, "%.1f s", ms.coerceAtLeast(0) / 1000.0)
+
     /** Prozent „42 %“. */
     fun percent(fraction: Float): String = "${(fraction.coerceIn(0f, 1f) * 100).toInt()} %"
 

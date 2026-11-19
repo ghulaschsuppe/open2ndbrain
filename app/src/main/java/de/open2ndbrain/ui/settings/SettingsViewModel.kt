@@ -62,6 +62,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setThreads(n: Int) = launch { container.settings.setTranscriptionThreads(n) }
+    fun setInterval(minutes: Int) = launch { container.settings.setTranscriptionInterval(minutes) }
 
     fun download(id: String, unmeteredOnly: Boolean) = models.download(id, unmeteredOnly)
     fun downloadAll(unmeteredOnly: Boolean) = models.downloadAll(unmeteredOnly)

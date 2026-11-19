@@ -5,6 +5,7 @@ import androidx.work.WorkInfo.State
 import de.open2ndbrain.core.RecordingFile
 import de.open2ndbrain.core.SpeakerProfile
 import de.open2ndbrain.core.TranscriptionStatus
+import de.open2ndbrain.settings.AppSettings
 import de.open2ndbrain.settings.SettingsKeys
 import de.open2ndbrain.settings.TranscriptionMode
 import de.open2ndbrain.ui.Formatters
@@ -101,7 +102,8 @@ class TranscriptionPlannerTest {
         val s = SettingsKeys.toAppSettings(mutablePreferencesOf())
         assertEquals(TranscriptionMode.Automatic, s.transcriptionMode)
         assertTrue(s.speakerRecognition)
-        assertEquals(4, s.transcriptionThreads)
+        assertEquals(AppSettings.THREADS_AUTO, s.transcriptionThreads)
+        assertEquals(15, s.transcriptionIntervalMin)
         val custom = SettingsKeys.toAppSettings(
             mutablePreferencesOf(
                 SettingsKeys.TRANSCRIPTION_MODE to "ChargingOnly",
@@ -112,7 +114,7 @@ class TranscriptionPlannerTest {
         assertEquals(TranscriptionMode.ChargingOnly, custom.transcriptionMode)
         assertEquals(2, custom.transcriptionThreads)
         assertFalse(custom.speakerRecognition)
-        assertEquals(4, SettingsKeys.toAppSettings(mutablePreferencesOf(SettingsKeys.TRANSCRIPTION_THREADS to 3)).transcriptionThreads)
+        assertEquals(AppSettings.THREADS_AUTO, SettingsKeys.toAppSettings(mutablePreferencesOf(SettingsKeys.TRANSCRIPTION_THREADS to 3)).transcriptionThreads)
         assertEquals(TranscriptionMode.Automatic, SettingsKeys.toAppSettings(mutablePreferencesOf(SettingsKeys.TRANSCRIPTION_MODE to "x")).transcriptionMode)
     }
 

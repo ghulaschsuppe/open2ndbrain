@@ -8,6 +8,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,9 @@ import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.HourglassTop
@@ -43,15 +48,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import de.open2ndbrain.R
 import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.TranscriptionStatus
+import de.open2ndbrain.work.TranscriptionRunStat
 import de.open2ndbrain.ui.Formatters
 import de.open2ndbrain.ui.components.IconBubble
 import de.open2ndbrain.ui.components.O2bCard
@@ -224,7 +233,11 @@ fun TitleDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit
  * [onTranscribeNow] (optional) zeigt „Jetzt transkribieren“, wenn Dateien warten.
  */
 @Composable
-fun TranscriptionCard(status: TranscriptionStatus, onTranscribeNow: (() -> Unit)? = null) {
+fun TranscriptionCard(
+    status: TranscriptionStatus,
+    onTranscribeNow: (() -> Unit)? = null,
+    runs: List<TranscriptionRunStat> = emptyList(),
+) {
     val scheme = MaterialTheme.colorScheme
     O2bCard(Modifier.fillMaxWidth().animateContentSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -241,7 +254,8 @@ fun TranscriptionCard(status: TranscriptionStatus, onTranscribeNow: (() -> Unit)
                 Text(headline, style = MaterialTheme.typography.titleMedium.tabular())
                 val details = buildList {
                     if (status.pendingCount > 0) add(pluralStringResource(R.plurals.transcription_queue, status.pendingCount, status.pendingCount))
-                    status.lastRealTimeFactor?.let { add(stringResource(R.string.transcription_rtf, Formatters.realTimeFactor(it))) }
+                    // Mit Laufstatistik steht der Echtzeitfaktor unten in der Diagnosezeile.
+                    if (runs.isEmpty()) status.lastRealTimeFactor?.let { add(stringResource(R.string.transcription_rtf, Formatters.realTimeFactor(it))) }
                 }
                 if (details.isNotEmpty()) {
                     Text(
@@ -260,7 +274,8 @@ fun TranscriptionCard(status: TranscriptionStatus, onTranscribeNow: (() -> Unit)
                 modifier = Modifier.padding(top = Spacing.xs),
             )
         }
-        if (onTranscribeNow != null && !status.running && status.pendingCount > 0) {
+        if (runs.isNotEmpty()) RunStats(runs)
+        if (onTranscribeNow != null && !status.running) {
             FilledTonalButton(
                 onClick = onTranscribeNow,
                 modifier = Modifier.padding(top = Spacing.sm).fillMaxWidth().heightIn(min = 48.dp),
@@ -272,6 +287,70 @@ fun TranscriptionCard(status: TranscriptionStatus, onTranscribeNow: (() -> Unit)
         }
     }
 }
+
+/** Dezente Diagnose: letzter Lauf in einer Zeile, aufklappbar zu den letzten Läufen mit Gerät. */
+@Composable
+private fun RunStats(runs: List<TranscriptionRunStat>) {
+    val scheme = MaterialTheme.colorScheme
+    var open by rememberSaveable { mutableStateOf(false) }
+    val last = runs.first()
+    Column(
+        Modifier
+            .padding(top = Spacing.sm)
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.small)
+            .background(scheme.surfaceContainerHigh)
+            .clickable(role = Role.Button) { open = !open }
+            .padding(horizontal = Spacing.sm, vertical = Spacing.xs),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 32.dp)) {
+            Icon(Icons.Filled.Speed, contentDescription = null, tint = scheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(Spacing.xs))
+            Text(
+                stringResource(R.string.transcription_last_run, runSummary(last)),
+                style = MaterialTheme.typography.bodySmall.tabular(),
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = stringResource(if (open) R.string.collapse else R.string.expand),
+                tint = scheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        if (open) {
+            runs.take(6).forEach { r ->
+                Row(Modifier.padding(top = Spacing.xxs)) {
+                    Text(
+                        Formatters.time(r.atEpochMs),
+                        style = MaterialTheme.typography.labelSmall.tabular(),
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.width(44.dp),
+                    )
+                    Text(
+                        "${Formatters.duration(r.audioMs)} → ${Formatters.duration(r.processingMs)} · ${runSummary(r)}",
+                        style = MaterialTheme.typography.labelSmall.tabular(),
+                        color = scheme.onSurface,
+                    )
+                }
+            }
+            Text(
+                stringResource(R.string.transcription_device, last.device),
+                style = MaterialTheme.typography.labelSmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = Spacing.xs),
+            )
+        }
+    }
+}
+
+@Composable
+private fun runSummary(r: TranscriptionRunStat): String = buildList {
+    r.realTimeFactor?.let { add(stringResource(R.string.transcription_rtf, Formatters.realTimeFactor(it))) }
+    if (r.loadMs > 0) add(stringResource(R.string.transcription_load, Formatters.seconds(r.loadMs)))
+    add(pluralStringResource(R.plurals.settings_threads_value, r.threads, r.threads))
+}.joinToString(" · ")
 
 @Composable
 private fun ProgressRing(status: TranscriptionStatus) {

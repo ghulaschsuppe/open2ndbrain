@@ -14,6 +14,8 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.time.Instant
+import java.time.ZoneId
 
 /** Prozessweiter Status der Transkription (Worker schreibt, UI liest). */
 class TranscriptionStatusStore : TranscriptionStatusHolder {
@@ -24,11 +26,38 @@ class TranscriptionStatusStore : TranscriptionStatusHolder {
 }
 
 /** Warum gerade nicht transkribiert wird (für [TranscriptionStatus.waitingReason]). */
-enum class WaitingReason { Off, ModelMissing, WaitingForCharger, BatteryLow }
+enum class WaitingReason { Off, ModelMissing, WaitingForCharger, BatteryLow, WaitingForSegment }
+
+/** Ergebnis der Prüfung „darf jetzt transkribiert werden?“ (Dienst-Runner und Worker). */
+sealed interface RunDecision {
+    data object Run : RunDecision
+    data class Wait(val reason: WaitingReason) : RunDecision
+}
 
 /** Reine Planungsentscheidungen (unit-getestet). */
 object TranscriptionPlanner {
 
+    /** Akku gilt als schwach unter diesem Ladestand (und nicht am Ladegerät). */
+    const val LOW_BATTERY_PERCENT = 20
+
+    fun batteryLow(percent: Int, charging: Boolean): Boolean = !charging && percent in 0 until LOW_BATTERY_PERCENT
+
+    /**
+     * Darf jetzt transkribiert werden? [force] („Jetzt transkribieren“) ignoriert „Aus“ und „Nur beim Laden“ einmalig,
+     * nicht aber fehlende Modelle oder schwachen Akku.
+     */
+    fun runDecision(mode: TranscriptionMode, modelsReady: Boolean, charging: Boolean, batteryPercent: Int, force: Boolean): RunDecision = when {
+        !modelsReady -> RunDecision.Wait(WaitingReason.ModelMissing)
+        mode == TranscriptionMode.Off && !force -> RunDecision.Wait(WaitingReason.Off)
+        mode == TranscriptionMode.ChargingOnly && !charging && !force -> RunDecision.Wait(WaitingReason.WaitingForCharger)
+        batteryLow(batteryPercent, charging) -> RunDecision.Wait(WaitingReason.BatteryLow)
+        else -> RunDecision.Run
+    }
+
+    /**
+     * Wartegrund für die Anzeige. [segmentRecording]: Es wird gerade aufgenommen – ist die Warteschlange leer,
+     * wartet die Transkription auf den Abschluss des aktuellen Abschnitts.
+     */
     fun waitingReason(
         mode: TranscriptionMode,
         modelsReady: Boolean,
@@ -36,15 +65,33 @@ object TranscriptionPlanner {
         running: Boolean,
         charging: Boolean,
         batteryLow: Boolean,
+        segmentRecording: Boolean = false,
     ): WaitingReason? = when {
         running -> null
         mode == TranscriptionMode.Off -> WaitingReason.Off
         !modelsReady -> WaitingReason.ModelMissing
-        pendingCount == 0 -> null
+        pendingCount == 0 -> if (segmentRecording) WaitingReason.WaitingForSegment else null
         mode == TranscriptionMode.ChargingOnly && !charging -> WaitingReason.WaitingForCharger
         batteryLow && !charging -> WaitingReason.BatteryLow
         else -> null
     }
+
+    /**
+     * Nächste Takt-Grenze (epoch ms) nach [now], an der Uhr ausgerichtet: bei 15 min also :00, :15, :30, :45 Ortszeit.
+     */
+    fun nextBoundary(now: Long, intervalMin: Int, zone: ZoneId): Long {
+        val t = Instant.ofEpochMilli(now).atZone(zone)
+        val midnight = t.toLocalDate().atStartOfDay(zone)
+        val minutes = java.time.Duration.between(midnight, t).toMinutes()
+        val nextMin = (minutes / intervalMin + 1) * intervalMin
+        val candidate = midnight.plusMinutes(nextMin)
+        // Tageswechsel: höchstens bis Mitternacht des Folgetages
+        val nextMidnight = t.toLocalDate().plusDays(1).atStartOfDay(zone)
+        return minOf(candidate.toInstant().toEpochMilli(), nextMidnight.toInstant().toEpochMilli())
+    }
+
+    /** Die Engine wechselt zur vollen Stunde ohnehin die Datei – dort ist kein zusätzlicher Split nötig. */
+    fun isFullHour(epochMs: Long, zone: ZoneId): Boolean = Instant.ofEpochMilli(epochMs).atZone(zone).let { it.minute == 0 && it.second == 0 }
 
     /**
      * Wie ein neuer Lauf eingereiht wird:

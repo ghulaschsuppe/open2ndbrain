@@ -9,7 +9,10 @@ import de.open2ndbrain.service.RecorderStatusHolder
 import de.open2ndbrain.settings.SettingsRepository
 import de.open2ndbrain.speakers.FileSpeakerRepository
 import de.open2ndbrain.transcription.FileTranscriptRepository
+import de.open2ndbrain.work.ContainerRunnerDeps
 import de.open2ndbrain.work.TranscriptionFailures
+import de.open2ndbrain.work.TranscriptionRunner
+import de.open2ndbrain.work.TranscriptionStats
 import de.open2ndbrain.work.TranscriptionScheduler
 import de.open2ndbrain.work.TranscriptionStatusStore
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +55,12 @@ class AppContainer(context: Context) {
     }
 
     val transcriptionScheduler: TranscriptionScheduler by lazy { TranscriptionScheduler(appContext, this) }
+
+    /** Gemeinsame Abarbeitung der Warteschlange (Dienst und Worker, nie gleichzeitig). */
+    val transcriptionRunner: TranscriptionRunner by lazy { TranscriptionRunner(ContainerRunnerDeps(appContext, this)) }
+
+    /** Diagnose: letzte 20 Transkriptionsläufe (Echtzeitfaktor, Ladezeit, Gerät). */
+    val transcriptionStats: TranscriptionStats by lazy { TranscriptionStats(File(appContext.filesDir, "stats/transcription.json")) }
 
     /** Meetings und Lesezeichen. */
     val markers: FileMarkerRepository by lazy { FileMarkerRepository(File(appContext.filesDir, "markers")) }

@@ -76,6 +76,7 @@ import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MarkerType
 import de.open2ndbrain.core.MicPreference
 import de.open2ndbrain.core.TranscriptionStatus
+import de.open2ndbrain.work.TranscriptionRunStat
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderNotifications
 import de.open2ndbrain.service.isStorageFull
@@ -100,6 +101,7 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
     val state by vm.state.collectAsStateWithLifecycle()
     val meeting by vm.meeting.collectAsStateWithLifecycle()
     val transcription by vm.transcription.collectAsStateWithLifecycle()
+    val runs by vm.transcriptionStats.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var problem by remember { mutableStateOf<Int?>(null) }
     var showMicDialog by remember { mutableStateOf(false) }
@@ -122,6 +124,7 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
         transcription = transcription,
         problem = problem,
         modifier = modifier,
+        runs = runs,
         actions = RecordActions(
             onToggle = { if (state.serviceRunning) vm.stop() else startWithPermission() },
             onPause = vm::pause,
@@ -137,8 +140,7 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
             onRenameMeeting = { vm.setMeetingTitle(it) },
             onBookmark = { vm.bookmark() },
             onOpenAppSettings = { SystemSettings.openAppDetails(context) },
-            // Wird vom App-Agenten verdrahtet, sobald RecordViewModel „Jetzt transkribieren“ anbietet.
-            onTranscribeNow = null,
+            onTranscribeNow = vm::transcribeNow,
         ),
     )
 
@@ -179,6 +181,7 @@ fun RecordContent(
     problem: Int?,
     actions: RecordActions,
     modifier: Modifier = Modifier,
+    runs: List<TranscriptionRunStat> = emptyList(),
 ) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ContentWidth {
@@ -209,7 +212,7 @@ fun RecordContent(
 
                     StatsRow(state)
 
-                    TranscriptionCard(transcription, onTranscribeNow = actions.onTranscribeNow)
+                    TranscriptionCard(transcription, onTranscribeNow = actions.onTranscribeNow, runs = runs)
                 }
             }
         }

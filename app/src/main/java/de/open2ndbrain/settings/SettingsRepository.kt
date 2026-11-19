@@ -40,9 +40,15 @@ data class AppSettings(
     val transcriptionMode: TranscriptionMode = TranscriptionMode.Automatic,
     /** Sprechererkennung gewünscht (wirkt nur, wenn das Modell installiert ist). */
     val speakerRecognition: Boolean = true,
-    /** CPU-Threads für die Transkription: 2 oder 4. */
+    /** CPU-Threads für die Transkription: [THREADS_AUTO] (Standard) oder 2/4/6. */
     val transcriptionThreads: Int = DEFAULT_THREADS,
+    /** Abschnittslänge für die Transkription in Minuten (Takt für `splitNow`): 10/15/30/60. */
+    val transcriptionIntervalMin: Int = DEFAULT_INTERVAL_MIN,
 ) {
+    /** Tatsächlich genutzte Threads für [cores] verfügbare Prozessorkerne. */
+    fun effectiveThreads(cores: Int = Runtime.getRuntime().availableProcessors()): Int =
+        if (transcriptionThreads == THREADS_AUTO) autoThreads(cores) else transcriptionThreads
+
     fun toEngineConfig(outputRoot: File): EngineConfig = EngineConfig(
         outputRoot = outputRoot,
         bitrateKbps = bitrateKbps,
@@ -64,8 +70,21 @@ data class AppSettings(
 
         const val PAUSED_INDEFINITELY = Long.MAX_VALUE
 
-        const val DEFAULT_THREADS = 4
-        val THREAD_OPTIONS = listOf(2, DEFAULT_THREADS)
+        const val THREADS_AUTO = 0
+        const val DEFAULT_THREADS = THREADS_AUTO
+        val THREAD_OPTIONS = listOf(THREADS_AUTO, 2, 4, 6)
+
+        const val DEFAULT_INTERVAL_MIN = 15
+        val INTERVAL_OPTIONS = listOf(10, DEFAULT_INTERVAL_MIN, 30, 60)
+
+        /**
+         * Automatische Threadzahl: halbe Kernzahl, höchstens 4 (Leistungskerne typischer 8-Kern-SoCs);
+         * erst bei sehr vielen Kernen (≥ 12) 6.
+         */
+        fun autoThreads(cores: Int): Int = when {
+            cores >= 12 -> 6
+            else -> (cores / 2).coerceIn(1, 4)
+        }
 
         /** Würde der Wechsel der Aufbewahrung von [old] auf [new] Tage sofort mehr Audio löschen? */
         fun retentionShortens(old: Int, new: Int): Boolean =
@@ -115,6 +134,7 @@ internal object SettingsKeys {
     val TRANSCRIPTION_MODE = stringPreferencesKey("transcription_mode")
     val SPEAKER_RECOGNITION = booleanPreferencesKey("speaker_recognition")
     val TRANSCRIPTION_THREADS = intPreferencesKey("transcription_threads")
+    val TRANSCRIPTION_INTERVAL = intPreferencesKey("transcription_interval_min")
 
     fun toAppSettings(p: Preferences): AppSettings {
         val defaults = AppSettings()
@@ -134,6 +154,8 @@ internal object SettingsKeys {
             speakerRecognition = p[SPEAKER_RECOGNITION] ?: defaults.speakerRecognition,
             transcriptionThreads = p[TRANSCRIPTION_THREADS]?.takeIf { it in AppSettings.THREAD_OPTIONS }
                 ?: defaults.transcriptionThreads,
+            transcriptionIntervalMin = p[TRANSCRIPTION_INTERVAL]?.takeIf { it in AppSettings.INTERVAL_OPTIONS }
+                ?: defaults.transcriptionIntervalMin,
         )
     }
 }
@@ -199,6 +221,11 @@ class SettingsRepository(context: Context) {
 
     suspend fun setSpeakerRecognition(value: Boolean) {
         store.edit { it[SettingsKeys.SPEAKER_RECOGNITION] = value }
+    }
+
+    suspend fun setTranscriptionInterval(minutes: Int) {
+        require(minutes in AppSettings.INTERVAL_OPTIONS) { "Ungültiger Takt: $minutes" }
+        store.edit { it[SettingsKeys.TRANSCRIPTION_INTERVAL] = minutes }
     }
 
     suspend fun setTranscriptionThreads(threads: Int) {

@@ -8,6 +8,7 @@ import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.ModelState
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.settings.AppSettings
+import de.open2ndbrain.work.TranscriptionRunStat
 import de.open2ndbrain.ui.settings.ModelRow
 import de.open2ndbrain.ui.settings.SettingDivider
 import de.open2ndbrain.ui.settings.SettingsActions
@@ -43,12 +44,18 @@ class ScreensScreenshotTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Composable
-    private fun Now() = RecordContent(RecordSamples.recording, RecordSamples.meeting, RecordSamples.transcribing, null, RecordActions())
+    private fun Now() = RecordContent(
+        RecordSamples.recording, RecordSamples.meeting, RecordSamples.transcribing, null, RecordActions(onTranscribeNow = {}),
+        runs = listOf(TranscriptionRunStat(0, "2025-11-19_12-00.ogg", 1_800_000, 252_000, 3_400, 4, "service", "Pixel 8 (Tensor G3)")),
+    )
 
+    @Config(qualifiers = "w400dp-h1240dp-xhdpi")
     @Test fun jetztDunkel() = compose.snapshot("1-jetzt", dark = true) { Now() }
 
+    @Config(qualifiers = "w400dp-h1240dp-xhdpi")
     @Test fun jetztHell() = compose.snapshot("1-jetzt", dark = false) { Now() }
 
+    @Config(qualifiers = "w400dp-h1240dp-xhdpi")
     @Test fun jetztAusHell() = compose.snapshot("1-jetzt-aus", dark = false) {
         RecordContent(RecordSamples.off, null, TranscriptionStatus(), null, RecordActions(onTranscribeNow = {}))
     }

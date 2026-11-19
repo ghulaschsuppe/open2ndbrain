@@ -17,6 +17,12 @@ class FormattersTest {
     }
 
     @Test
+    fun seconds() {
+        assertEquals("3,2 s", Formatters.seconds(3_240))
+        assertEquals("0,0 s", Formatters.seconds(-1))
+    }
+
+    @Test
     fun elapsedMinutes() {
         assertEquals("< 1 min", Formatters.elapsedMinutes(0))
         assertEquals("1 min", Formatters.elapsedMinutes(1))

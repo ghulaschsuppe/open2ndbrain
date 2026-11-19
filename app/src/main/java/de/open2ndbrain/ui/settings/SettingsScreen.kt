@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Timelapse
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
@@ -114,6 +115,7 @@ private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (Set
             onTranscriptionMode = { vm.setTranscriptionMode(it) },
             onSpeakerRecognition = { vm.setSpeakerRecognition(it) },
             onThreads = { vm.setThreads(it) },
+            onInterval = { vm.setInterval(it) },
             onRetention = { vm.setRetention(it) },
             onDynamicColor = themePrefs::setDynamicColor,
             onOpenLicenses = { onOpen(SettingsPage.Licenses) },
@@ -131,6 +133,7 @@ class SettingsActions(
     val onTranscriptionMode: (TranscriptionMode) -> Unit = {},
     val onSpeakerRecognition: (Boolean) -> Unit = {},
     val onThreads: (Int) -> Unit = {},
+    val onInterval: (Int) -> Unit = {},
     val onRetention: (Int) -> Unit = {},
     val onDynamicColor: (Boolean) -> Unit = {},
     val onOpenLicenses: () -> Unit = {},
@@ -238,9 +241,12 @@ fun SettingsContent(
                         SettingHeader(
                             Icons.Filled.Memory,
                             stringResource(R.string.settings_threads),
-                            stringResource(
-                                if (s.transcriptionThreads == AppSettings.DEFAULT_THREADS) R.string.settings_threads_fast else R.string.settings_threads_saver,
-                            ),
+                            if (s.transcriptionThreads == AppSettings.THREADS_AUTO) {
+                                stringResource(R.string.settings_threads_auto, s.effectiveThreads()) + " · " +
+                                    stringResource(R.string.settings_threads_fast)
+                            } else {
+                                stringResource(R.string.settings_threads_saver)
+                            },
                         )
                         SingleChoiceSegmentedButtonRow(
                             Modifier
@@ -252,7 +258,44 @@ fun SettingsContent(
                                     selected = s.transcriptionThreads == n,
                                     onClick = { actions.onThreads(n) },
                                     shape = SegmentedButtonDefaults.itemShape(i, AppSettings.THREAD_OPTIONS.size),
-                                ) { Text(pluralStringResource(R.plurals.settings_threads_value, n, n)) }
+                                ) {
+                                    Text(
+                                        if (n == AppSettings.THREADS_AUTO) {
+                                            stringResource(R.string.settings_threads_auto_short)
+                                        } else {
+                                            n.toString()
+                                        },
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                        SettingDivider()
+                        SettingHeader(
+                            Icons.Filled.Timelapse,
+                            stringResource(R.string.settings_interval),
+                            stringResource(
+                                if (s.transcriptionIntervalMin == AppSettings.DEFAULT_INTERVAL_MIN) R.string.settings_interval_default else R.string.settings_interval_desc,
+                            ),
+                        )
+                        FlowRow(
+                            Modifier.padding(start = 72.dp, end = Spacing.md, bottom = Spacing.sm),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        ) {
+                            AppSettings.INTERVAL_OPTIONS.forEach { m ->
+                                val selected = s.transcriptionIntervalMin == m
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { actions.onInterval(m) },
+                                    label = { Text(stringResource(R.string.settings_interval_value, m)) },
+                                    leadingIcon = if (selected) {
+                                        { Icon(Icons.Filled.CheckCircle, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                                    } else {
+                                        null
+                                    },
+                                    modifier = Modifier.heightIn(min = 40.dp),
+                                )
                             }
                         }
                     }
