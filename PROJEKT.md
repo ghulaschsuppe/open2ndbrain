@@ -9,7 +9,16 @@ durchsuchbares „Second Brain“ mit optionalem lokalem KI-Modell. Komplett off
 - Sprache primär: Deutsch (Parakeet TDT 0.6B v3 multilingual)
 
 ## Status
-Phase 0 – Konzept. Siehe [docs/KONZEPT.md](docs/KONZEPT.md).
+Phase 1 – Recorder (in Arbeit). Konzept: [docs/KONZEPT.md](docs/KONZEPT.md).
+
+## Projektstruktur
+- `app/src/main/java/de/open2ndbrain/core/` – Verträge (Schnittstellen) zwischen Engine und App, `AppContainer` (manuelle DI)
+- `…/audio/` – Aufnahme-Engine: AudioRecord, VAD, Opus/OGG-Stundendateien, Sidecars, Bluetooth-Routing
+- `…/service/` – Vordergrunddienst, Benachrichtigung, Neustart, Schnelleinstellungs-Kachel
+- `…/ui/` – Compose-Oberfläche · `…/settings/` – DataStore-Einstellungen
+
+## Lokal bauen
+JDK 17+ und Android SDK (Platform 36) nötig: `./gradlew testDebugUnitTest lintDebug assembleDebug`
 
 ## Build & Auslieferung
 - Ausschließlich über GitHub: GitHub Actions baut die APK, Tags `v*` erzeugen ein GitHub-Release mit APK.
