@@ -31,3 +31,30 @@ Alles hier ist per Unit-Tests nur als Logik geprüft. Diese Punkte brauchen ein 
 ## Sonstiges
 - [ ] Speicher fast voll: Warnung (< 2 GB), Notlöschung (< 1 GB), Meldung „Speicher voll“.
 - [ ] Hell/Dunkel, dynamische Farben, Adaptive-/Monochrom-Icon.
+
+---
+
+# Gerätetest Phase 2 – Transkription, Sprecher, Meetings
+
+Logs zusätzlich: `adb logcat -s O2B-ML O2B-Speakers TranscriptionWorker TranscriptionScheduler ModelDownload ModelDownloadWorker Markers MeetingTile`
+
+## Modelle
+- [ ] Einstellungen → Sprachmodelle: Parakeet (~670 MB), Silero VAD, WeSpeaker laden – über WLAN; Fortschritt in Benachrichtigung.
+- [ ] Download abbrechen / App schließen / Netz wechseln → setzt fort (kein Neubeginn).
+- [ ] Optional: Import der Modelldateien per Dateiauswahl (ohne Internet am Gerät).
+
+## Transkription
+- [ ] Nach einer vollen Stunde Aufnahme startet die Transkription automatisch; Status im Aufnahme-Tab (Fortschritt, Echtzeitfaktor).
+- [ ] Echtzeitfaktor notieren (am PC 0,07; Handy erwartet 0,15–0,4) und ob das Handy dabei warm wird.
+- [ ] Transkript-Ansicht: Text lesbar, Uhrzeiten stimmen, Antippen springt im Player an die Stelle.
+- [ ] Modus „Nur beim Laden“: Transkription startet erst am Ladegerät; Abziehen bricht sauber ab und setzt später fort.
+
+## Sprecher
+- [ ] Gespräch mit 2–3 Personen: verschiedene Sprecher erkannt? Am nächsten Tag dieselben wiedererkannt?
+- [ ] Umbenennen, „Das bin ich“, Zusammenführen (alte Transkripte zeigen danach den neuen Namen), Löschen.
+- [ ] Mit Bluetooth-Headset vs. Handy-Mikrofon: wird dieselbe Person als derselbe Sprecher erkannt? (Schwellen evtl. nachjustieren)
+
+## Meetings & Lesezeichen
+- [ ] Meeting starten/beenden in App, Benachrichtigung und Kachel „Meeting“ (auch gesperrt).
+- [ ] Nach Meeting-Ende wird das Meeting zuerst transkribiert; Meeting-Ansicht zeigt alle Äußerungen über Stundengrenzen hinweg.
+- [ ] „Merken“ setzt ein Lesezeichen (30 s zurück), Fähnchen im Transkript.

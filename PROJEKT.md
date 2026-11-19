@@ -9,7 +9,7 @@ durchsuchbares „Second Brain“ mit optionalem lokalem KI-Modell. Komplett off
 - Sprache primär: Deutsch (Parakeet TDT 0.6B v3 multilingual)
 
 ## Status
-Phase 1 – Recorder: fertig, auf dem Gerät getestet (Bluetooth noch offen). Phase 2 – Transkription & Sprechererkennung: in Arbeit ([Messungen](docs/dev/PHASE2-MESSUNGEN.md)). Konzept: [docs/KONZEPT.md](docs/KONZEPT.md).
+Phase 1 – Recorder: fertig, auf dem Gerät getestet (Bluetooth noch offen). Phase 2 – Transkription, Sprechererkennung, Meetings: umgesetzt, Gerätetest offen ([Checkliste](docs/GERAETETEST.md), [Messungen](docs/dev/PHASE2-MESSUNGEN.md)). Konzept: [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Projektstruktur
 - `app/src/main/java/de/open2ndbrain/core/` – Verträge (Schnittstellen) zwischen Engine und App, `AppContainer` (manuelle DI)
