@@ -25,3 +25,47 @@ Künstliches Gespräch: 3 verschiedene Vorleser, 16 Wechsel, 177 s, Opus 16 kbit
 **Entscheidung:** Abschnittsweises Embedding mit WeSpeaker ResNet34 (26 MB) und Abgleich gegen dateiübergreifend
 gespeicherte Sprecherprofile (Schwelle Startwert 0,6, einstellbar). Einschränkung: Der Test hat saubere Sprecherwechsel
 mit Pausen; bei schnellem Hin-und-her/Überlappung wird ein Abschnitt dem überwiegenden Sprecher zugeordnet.
+
+## Wiedererkennung über Dateien (Kotlin-Pipeline, Linux-JNI)
+Zwei Aufnahmen derselben 3 Sprecher mit verschiedenen Textstellen: `conv16.wav` (176 s) und `conv2_16.wav` (137 s).
+Embeddings je Abschnitt ≥ 1 s exportiert mit `SpeakerEmbeddingDumpTest`, ausgewertet mit
+`tools/model-eval/speaker_seeded_eval.py`.
+
+**Gemessene Cosinus-Werte (WeSpeaker ResNet34)**
+
+| Vergleich | Datei 1 | Datei 2 |
+|---|---|---|
+| Abschnitt ↔ Zentrum des eigenen Sprechers (ohne sich selbst), min / 5 %-Quantil | 0,79 / 0,80 | **0,65** / 0,77 |
+| Abschnitt ↔ Zentrum eines fremden Sprechers, max / 95 %-Quantil | 0,74 / 0,70 | **0,87** / 0,77 |
+| Zentrum ↔ Zentrum, gleicher Sprecher (Hälften bzw. über Dateien) | 0,94–0,98 | 0,97–0,98 |
+| Zentrum ↔ Zentrum, verschiedene Sprecher | ≤ 0,75 | ≤ 0,81 |
+
+In Datei 2 überlappen die Verteilungen schon innerhalb der Datei: Mit rein lokalem Clustering (Schwelle 0,6) werden
+dort zwei Sprecher verschmolzen (67–69 %), unabhängig von einer höheren lokalen Schwelle (0,65–0,75: zusätzliche Profile,
+62–69 %). Zentren über Dateien trennen dagegen sauber.
+
+**Verfahren (seit Phase 2):** Bekannte Profile gehen als feste Start-Cluster in das Clustering jeder Datei.
+1. Gierig je Abschnitt: bestes Zentrum unter Profilen (Schwelle **0,68**) und lokalen Clustern (Schwelle **0,6**),
+   sonst neuer lokaler Cluster.
+2. Zwei Runden Neuzuordnung jedes Abschnitts zum ähnlichsten Zentrum (Profile bleiben fest).
+3. Lokale Cluster mit Zentren-Cosinus ≥ **0,88** zu einem Profil oder älteren lokalen Cluster zusammenlegen.
+4. Neue Profile nur ab 3 s Sprache.
+
+**Schwellenwahl** (Raster über Profil-Schwelle 0,55–0,75 × lokal 0,6–0,75 × Zusammenlegen 0,85–0,92; Szenarien:
+Datei 1 → Datei 2 → Datei 1 sowie „ein Sprecher neu“ mit Profilen nur für 2 der 3 Sprecher):
+- Profil-Schwelle: 0,6–0,75 besteht alle Szenarien (3 Profile, ≥ 95 %), 0,55 verschmilzt einen neuen Sprecher mit einem
+  bekannten (69 %) → **0,68** (Mitte des Plateaus).
+- Lokale Schwelle: 0,6–0,75 gleichwertig → **0,6** (bisheriger, validierter Wert).
+- Zusammenlegen: 0,85–0,92 gleichwertig; liegt zwischen „verschieden ≤ 0,81“ und „gleich ≥ 0,94“ → **0,88**.
+
+**Ergebnis Integrationstest** (`SherpaIntegrationTest`, Runde 2 mit Zuordnung aus Runde 1 bewertet):
+
+| | vorher (lokal + Zentren-Abgleich 0,82) | nachher |
+|---|---|---|
+| Runde 1: Datei 1, neue Profile | 3 Profile, 99 % | 3 Profile, 99 % |
+| Runde 2: Datei 2, Wiedererkennung | 3 Profile, **67 %** (zwei Sprecher in einem Profil) | 3 Profile, **98 %** |
+| Runde 3: Datei 1 erneut | – | keine neuen Profile, 99 % |
+
+Einschränkung: nur zwei Aufnahmen gleicher Qualität (Hörbücher). Für andere Mikrofone/Räume (BT-Headset, Telefon
+auf dem Tisch) sind die Werte auf echten Alltagsaufnahmen nachzuprüfen; die Schwellen sind Konstanten in
+`speakers/SpeakerClustering.kt`.

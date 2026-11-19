@@ -20,9 +20,10 @@ import java.io.File
  * Audiopfad weiter.
  */
 class FileTranscriptRepository(
-    @Suppress("unused") private val audioRoot: File,
+    private val audioRoot: File,
     private val recordings: RecordingRepository,
     private val refreshMs: Long = 10_000,
+    private val now: () -> Long = System::currentTimeMillis,
 ) : TranscriptRepository {
 
     override fun observeTranscript(audio: File): Flow<Transcript?> = flow {
@@ -36,6 +37,7 @@ class FileTranscriptRepository(
     override suspend fun pending(): List<RecordingFile> {
         val all = recordings.observeRecordings().first()
         return withContext(Dispatchers.IO) {
+            cleanupOrphanParts()
             all.asSequence()
                 .filter { !it.inProgress && !it.audio.name.endsWith(".part") && it.audio.isFile }
                 .filter { rf -> TranscriptFiles.readVersion(rf.audio).let { it == null || it < Transcript.CURRENT_VERSION } }
@@ -44,7 +46,20 @@ class FileTranscriptRepository(
         }
     }
 
+    /** Abgebrochene Schreibvorgänge (`*.transcript.json.part` älter als 10 min) entfernen. */
+    internal fun cleanupOrphanParts() {
+        if (!audioRoot.isDirectory) return
+        val cutoff = now() - ORPHAN_PART_AGE_MS
+        audioRoot.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(TranscriptFiles.SUFFIX + ".part") && it.lastModified() < cutoff }
+            .forEach { it.delete() }
+    }
+
     override suspend fun delete(audio: File) {
         withContext(Dispatchers.IO) { TranscriptFiles.delete(audio) }
+    }
+
+    private companion object {
+        const val ORPHAN_PART_AGE_MS = 10 * 60_000L
     }
 }

@@ -3,6 +3,7 @@ package de.open2ndbrain.transcription
 import android.content.Context
 import android.util.Log
 import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.ModelLoadException
 import de.open2ndbrain.core.RecordingFile
 import de.open2ndbrain.core.SpeakerRepository
 import de.open2ndbrain.core.Transcriber
@@ -17,7 +18,9 @@ import java.io.IOException
  *
  * - Modelle werden beim ersten [transcribe] geladen und bis [close] gehalten (~1 GB nativer Speicher).
  * - Blockierend, nicht thread-sicher; nur aus einem Hintergrund-Thread aufrufen.
- * - Abbruch über Thread-Interrupt → [InterruptedException], es wird dann nichts geschrieben.
+ * - Fehler: [ModelLoadException] (Modell fehlt/defekt/ABI), [IOException] (Datei/Decoder, später erneut
+ *   versuchen), [InterruptedException] (Abbruch; es wird nichts geschrieben), OutOfMemoryError unverändert.
+ * - Sprecherprofile werden erst geändert, nachdem das Transkript geschrieben ist (idempotent je Datei).
  */
 class SherpaTranscriber(
     @Suppress("unused") private val context: Context,
@@ -31,9 +34,9 @@ class SherpaTranscriber(
 
     override fun transcribe(recording: RecordingFile, onProgress: (Float) -> Unit): Transcript {
         check(!closed) { "Transcriber ist geschlossen" }
-        val started = System.currentTimeMillis()
         TranscriptionPipeline.checkInterrupted()
         ensureLoaded()
+        val started = System.currentTimeMillis() // Echtzeitfaktor ohne Ladezeit
 
         val audio = recording.audio
         if (!audio.isFile) throw IOException("Audiodatei fehlt: ${audio.name}")
@@ -42,6 +45,7 @@ class SherpaTranscriber(
         val matcher = speakers as? SpeakerMatcher
         val seenAt = sidecar?.segments?.lastOrNull()?.let { it.startEpochMs + it.durationMs } ?: recording.hourStartEpochMs
         val emb = embedder
+        val audioName = audio.name.removeSuffix(".part")
 
         val pipeline = TranscriptionPipeline(
             recognizer = recognizer!!,
@@ -52,14 +56,12 @@ class SherpaTranscriber(
                 null
             },
             embedder = emb,
-            matchClusters = { clusters ->
-                if (matcher == null || clusters.isEmpty()) List(clusters.size) { null }
-                else runBlocking { matcher.matchOrCreate(clusters, seenAt) }
-            },
+            speakers = matcher,
         )
         val expected = msToSamples(recording.durationMs.takeIf { it > 0 } ?: 3_600_000L)
+        val source = MediaCodecPcmSource(audio, MediaCodecPcmSource.partialPolicy(sidecar?.complete, recording.durationMs))
         val result = try {
-            pipeline.run(MediaCodecPcmSource(audio), mapper, expected, onProgress)
+            pipeline.run(source, mapper, expected, onProgress)
         } catch (e: NoAudioTrackException) {
             // Dauerhaft unlesbar (z. B. abgebrochene M4A ohne moov): leeres Transkript, damit sie nicht ewig wartet.
             Log.w(TAG, "Keine lesbare Audiospur in ${audio.name} – leeres Transkript", e)
@@ -68,7 +70,7 @@ class SherpaTranscriber(
         TranscriptionPipeline.checkInterrupted()
 
         val transcript = Transcript(
-            audioFileName = audio.name.removeSuffix(".part"),
+            audioFileName = audioName,
             asrModelId = ModelCatalog.PARAKEET_V3.id,
             speakerModelId = if (result.speakersUsed) ModelCatalog.WESPEAKER_RESNET34.id else null,
             createdAtEpochMs = System.currentTimeMillis(),
@@ -77,6 +79,15 @@ class SherpaTranscriber(
             utterances = result.utterances,
         )
         TranscriptFiles.write(audio, transcript)
+        // Erst jetzt die Profile ändern (bei Abbruch/Fehler davor bleiben sie unverändert)
+        val update = result.speakerUpdate
+        if (matcher != null && update != null && update.entries.isNotEmpty()) {
+            try {
+                runBlocking { matcher.apply(update, audioName, seenAt) }
+            } catch (e: IOException) {
+                Log.e(TAG, "Sprecherprofile nicht aktualisiert (${audio.name})", e)
+            }
+        }
         Log.i(
             TAG,
             "${audio.name}: ${transcript.utterances.size} Äußerungen, ${transcript.audioDurationMs / 1000} s Audio " +
@@ -92,13 +103,9 @@ class SherpaTranscriber(
             requireModelFile(config.vadModelFile)
             recognizer = SherpaRecognizer(config.asrModelDir, config.numThreads.coerceIn(1, 8))
             embedder = config.speakerModelFile?.let { SherpaEmbedder(it, config.numThreads.coerceIn(1, 4)) }
-        } catch (e: IllegalStateException) {
-            releaseModels()
-            throw e
         } catch (e: Throwable) {
-            // z. B. UnsatisfiedLinkError (ABI) oder Fehler beim Laden der ONNX-Modelle
             releaseModels()
-            throw IllegalStateException("Modelle nicht ladbar: ${e.message ?: e.javaClass.simpleName}", e)
+            throw e // ModelLoadException bzw. OutOfMemoryError unverändert
         }
         Log.i(TAG, "Modelle geladen in ${System.currentTimeMillis() - t0} ms (Sprecher: ${embedder != null})")
     }
