@@ -136,21 +136,24 @@ internal class TranscriptionPipeline(
         val ids = matchClusters(result.clusters)
         val segIds = arrayOfNulls<String>(segs.size)
         idx.forEachIndexed { k, segIndex -> segIds[segIndex] = ids.getOrNull(result.labels[k]) }
-        // Kurze Abschnitte (ohne eigenes Embedding): dem nächsten Nachbarn mit ID zuordnen, wenn nah genug
+        // Kurze Abschnitte (ohne eigenes Embedding): Sprecher der Nachbarn übernehmen – wenn beide Nachbarn
+        // übereinstimmen bis [NEIGHBOR_AGREE_MAX_GAP_MS] Abstand, sonst den nächsten bis [NEIGHBOR_MAX_GAP_MS].
+        val embeddedIdx = idx.toIntArray()
         for (i in segs.indices) {
             if (i in embeddings) continue
-            var best: String? = null
-            var bestGap = Long.MAX_VALUE
-            for (j in listOf(i - 1, i + 1)) {
-                val id = segIds.getOrNull(j) ?: continue
-                if (j !in embeddings) continue
-                val gap = if (j < i) segs[i].start - segs[j].end else segs[j].start - segs[i].end
-                if (gap < bestGap) {
-                    bestGap = gap
-                    best = id
-                }
+            val pos = java.util.Arrays.binarySearch(embeddedIdx, i).let { -(it + 1) }
+            val prev = embeddedIdx.getOrNull(pos - 1)
+            val next = embeddedIdx.getOrNull(pos)
+            val gapPrev = prev?.let { segs[i].start - segs[it].end } ?: Long.MAX_VALUE
+            val gapNext = next?.let { segs[it].start - segs[i].end } ?: Long.MAX_VALUE
+            val idPrev = prev?.let { segIds[it] }
+            val idNext = next?.let { segIds[it] }
+            segIds[i] = when {
+                idPrev != null && idPrev == idNext && maxOf(gapPrev, gapNext) <= msToSamples(NEIGHBOR_AGREE_MAX_GAP_MS) -> idPrev
+                gapPrev <= gapNext && gapPrev <= msToSamples(NEIGHBOR_MAX_GAP_MS) -> idPrev
+                gapNext < gapPrev && gapNext <= msToSamples(NEIGHBOR_MAX_GAP_MS) -> idNext
+                else -> null
             }
-            if (bestGap <= msToSamples(NEIGHBOR_MAX_GAP_MS)) segIds[i] = best
         }
         val starts = LongArray(segs.size) { segs[it].start }
         return { ms ->
@@ -205,6 +208,7 @@ internal class TranscriptionPipeline(
         /** Abschnitte < 1 s bekommen kein eigenes Embedding. */
         val MIN_EMBED_SAMPLES = msToSamples(1_000)
         private const val NEIGHBOR_MAX_GAP_MS = 1_000L
+        private const val NEIGHBOR_AGREE_MAX_GAP_MS = 5_000L
         private const val PAUSE_ASSIGN_MAX_MS = 500L
 
         fun checkInterrupted() {

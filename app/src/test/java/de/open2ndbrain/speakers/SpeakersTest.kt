@@ -92,6 +92,38 @@ class FileSpeakerRepositoryTest {
         assertEquals(first[0], r.matchOrCreate(listOf(cluster(0, count = 1, ms = 1_200)), 6_000).single())
     }
 
+    /** Zwei Zentren mit vorgegebenem Cosinus (wie fremde Sprecher derselben Aufnahme: ~0,75). */
+    private fun pair(cos: Double): Pair<ClusterSummary, ClusterSummary> {
+        val a = FloatArray(64).also { it[0] = 1f }
+        val b = FloatArray(64).also { it[0] = cos.toFloat(); it[1] = kotlin.math.sqrt(1 - cos * cos).toFloat() }
+        return ClusterSummary(a, 10, 20_000) to ClusterSummary(b, 10, 20_000)
+    }
+
+    @Test
+    fun similarButDistinctClustersOfOneFileStaySeparate() = runBlocking {
+        // Regression: Zentren verschiedener Sprecher haben oft Cosinus 0,6–0,75 und wurden verschmolzen
+        val r = repo()
+        val (a, b) = pair(0.75)
+        val ids = r.matchOrCreate(listOf(a, b), 1_000)
+        assertEquals(2, ids.distinct().size)
+        // dieselbe „Datei“ erneut: beide wiedererkannt, keine neuen Profile, kein Vertauschen
+        assertEquals(ids, r.matchOrCreate(listOf(a, b), 2_000))
+        assertEquals(2, r.observeSpeakers().first().size)
+    }
+
+    @Test
+    fun matchingIsOneToOnePerFile() = runBlocking {
+        val r = repo()
+        val known = r.matchOrCreate(listOf(cluster(0)), 1_000).single()!!
+        // zwei Cluster ähneln demselben Profil: nur der ähnlichere bekommt es, der andere wird neu
+        val close = cluster(0, count = 10)
+        val farther = ClusterSummary(SpeakerMath.weightedMean(close.centroid, 0.85, cluster(1).centroid, 0.15), 5, 10_000)
+        val ids = r.matchOrCreate(listOf(farther, close), 2_000)
+        assertEquals(known, ids[1])
+        assertNotEquals(known, ids[0])
+        assertNotNull(ids[0])
+    }
+
     @Test
     fun renameSetMeMergeAliasDeleteAndPersistence() = runBlocking {
         val r = repo()

@@ -4,6 +4,7 @@ import de.open2ndbrain.core.RecordingSidecar
 import de.open2ndbrain.speakers.FileSpeakerRepository
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -39,7 +40,10 @@ class SherpaIntegrationTest {
         val start = 1_700_000_000_000L
         val mapper = FileTimeMapper(listOf(RecordingSidecar.Segment(0, start, pcm.size / 16L)), start)
 
-        val t0 = System.currentTimeMillis()
+        val truth = System.getenv("O2B_TEST_TRUTH")?.let { File(it) }?.takeIf { it.isFile }?.readLines()
+            ?.filter { it.isNotBlank() }
+            ?.map { l -> l.split(" ").let { Triple(it[0].toDouble(), it[1].toDouble(), it[2]) } }
+
         SherpaRecognizer(File(models, "parakeet"), 4).use { rec ->
             SherpaEmbedder(File(models, "wespeaker_en_voxceleb_resnet34.onnx"), 4).use { emb ->
                 val pipeline = TranscriptionPipeline(
@@ -49,27 +53,39 @@ class SherpaIntegrationTest {
                     embedder = emb,
                     matchClusters = { c -> runBlocking { repo.matchOrCreate(c, start) } },
                 )
-                val result = pipeline.run(source, mapper, pcm.size.toLong()) {}
-                val secs = (System.currentTimeMillis() - t0) / 1000.0
-                println("Audio ${pcm.size / 16_000} s, Rechenzeit %.1f s, RTF %.3f".format(secs, secs / (pcm.size / 16_000.0)))
-                result.utterances.forEach { u ->
-                    println("[%7.1f s] %-12s %s".format(u.fileOffsetMs / 1000.0, u.speakerId?.take(8) ?: "-", u.text))
-                }
-                val speakers = runBlocking { repo.observeSpeakers().first() }
-                println("Sprecherprofile: ${speakers.size} → " + speakers.joinToString { "Nr. ${it.number}: ${it.totalSpeechMs / 1000} s" })
-                assertTrue("keine Äußerungen", result.utterances.isNotEmpty())
-                System.getenv("O2B_TEST_TRUTH")?.let { File(it) }?.takeIf { it.isFile }?.let { truthFile ->
-                    val truth = truthFile.readLines().filter { it.isNotBlank() }.map { l -> l.split(" ").let { Triple(it[0].toDouble(), it[1].toDouble(), it[2]) } }
-                    // Mehrheitszuordnung Sprecher-ID → wahrer Sprecher, Anteil richtig zugeordneter Äußerungs-Sekunden
-                    val pairs = result.utterances.mapNotNull { u ->
-                        val mid = (u.fileOffsetMs + u.durationMs / 2) / 1000.0
-                        val t = truth.firstOrNull { mid in it.first..it.second } ?: return@mapNotNull null
-                        Triple(u.speakerId, t.third, u.durationMs)
+                // Runde 1: neue Profile; Runde 2: dieselbe Datei erneut → Wiedererkennung, keine neuen Profile
+                var profilesAfterFirst = 0
+                for (round in 1..2) {
+                    val t0 = System.currentTimeMillis()
+                    val result = pipeline.run(source, mapper, pcm.size.toLong()) {}
+                    val secs = (System.currentTimeMillis() - t0) / 1000.0
+                    println("Runde $round: Audio ${pcm.size / 16_000} s, Rechenzeit %.1f s, RTF %.3f".format(secs, secs / (pcm.size / 16_000.0)))
+                    if (round == 1) {
+                        result.utterances.forEach { u ->
+                            println("[%7.1f s] %-12s %s".format(u.fileOffsetMs / 1000.0, u.speakerId?.take(8) ?: "-", u.text))
+                        }
                     }
-                    val major = pairs.groupBy { it.first }.mapValues { (_, l) -> l.groupBy { it.second }.maxBy { it.value.sumOf { p -> p.third } }.key }
-                    val ok = pairs.filter { major[it.first] == it.second }.sumOf { it.third }
-                    val all = pairs.sumOf { it.third }
-                    println("Sprecherzuordnung: %.0f %% der Sprechzeit richtig".format(100.0 * ok / all))
+                    val speakers = runBlocking { repo.observeSpeakers().first() }
+                    println("Sprecherprofile: ${speakers.size} → " + speakers.joinToString { "Nr. ${it.number}: ${it.totalSpeechMs / 1000} s" })
+                    assertTrue("keine Äußerungen", result.utterances.isNotEmpty())
+                    if (round == 1) profilesAfterFirst = speakers.size
+                    else assertEquals("Wiedererkennung: keine neuen Profile in Runde 2", profilesAfterFirst, speakers.size)
+                    if (truth != null) {
+                        // Mehrheitszuordnung Sprecher-ID → wahrer Sprecher, Anteil richtig zugeordneter Äußerungs-Sekunden
+                        val pairs = result.utterances.mapNotNull { u ->
+                            val mid = (u.fileOffsetMs + u.durationMs / 2) / 1000.0
+                            val t = truth.firstOrNull { mid in it.first..it.second } ?: return@mapNotNull null
+                            Triple(u.speakerId, t.third, u.durationMs)
+                        }
+                        val major = pairs.groupBy { it.first }.mapValues { (_, l) -> l.groupBy { it.second }.maxBy { it.value.sumOf { p -> p.third } }.key }
+                        val ok = pairs.filter { it.first != null && major[it.first] == it.second }.sumOf { it.third }
+                        val all = pairs.sumOf { it.third }
+                        val share = ok.toDouble() / all
+                        println("Sprecherzuordnung Runde $round: %.0f %% der Sprechzeit richtig".format(100.0 * share))
+                        val trueSpeakers = truth.map { it.third }.distinct().size
+                        assertEquals("Anzahl Profile", trueSpeakers, speakers.size)
+                        assertTrue("Sprecherzuordnung %.0f %% < 90 %%".format(100 * share), share >= 0.9)
+                    }
                 }
             }
         }

@@ -78,32 +78,41 @@ class FileSpeakerRepository(
     ): List<String?> {
         val result = arrayOfNulls<String>(clusters.size)
         edit { start ->
-            var s = start
-            // Große Cluster zuerst: sie prägen neue Profile, kleine werden eher zugeordnet
-            for (i in clusters.indices.sortedByDescending { clusters[it].speechMs }) {
-                val c = clusters[i]
-                val best = s.speakers
-                    .map { it to SpeakerMath.cosine(it.embedding.toFloatArray(), c.centroid) }
-                    .maxByOrNull { it.second }
-                if (best != null && best.second >= threshold) {
-                    val updated = absorb(best.first, c, seenAtEpochMs)
-                    s = s.copy(speakers = s.speakers.map { if (it.id == updated.id) updated else it })
-                    result[i] = updated.id
-                } else if (c.speechMs >= minNewSpeechMs) {
-                    val p = SpeakerProfile(
-                        id = UUID.randomUUID().toString(),
-                        number = s.nextNumber,
-                        embedding = c.centroid.toList(),
-                        sampleCount = c.count,
-                        totalSpeechMs = c.speechMs,
-                        firstSeenEpochMs = seenAtEpochMs,
-                        lastSeenEpochMs = seenAtEpochMs,
-                    )
-                    s = s.copy(nextNumber = s.nextNumber + 1, speakers = s.speakers + p)
-                    result[i] = p.id
+            val existing = start.speakers
+            // Alle Paare über der Schwelle, bestes zuerst; jedes Profil und jeder Cluster höchstens einmal
+            val pairs = ArrayList<Triple<Int, Int, Double>>()
+            clusters.forEachIndexed { ci, c ->
+                existing.forEachIndexed { pi, p ->
+                    val sim = SpeakerMath.cosine(p.embedding.toFloatArray(), c.centroid)
+                    if (sim >= threshold) pairs += Triple(ci, pi, sim)
                 }
             }
-            s
+            val usedProfiles = HashSet<Int>()
+            val updated = existing.toMutableList()
+            for ((ci, pi, _) in pairs.sortedByDescending { it.third }) {
+                if (result[ci] != null || pi in usedProfiles) continue
+                usedProfiles += pi
+                updated[pi] = absorb(existing[pi], clusters[ci], seenAtEpochMs)
+                result[ci] = existing[pi].id
+            }
+            var next = start.nextNumber
+            // Neue Profile: große Cluster zuerst (bekommen die kleineren Nummern)
+            for (ci in clusters.indices.sortedByDescending { clusters[it].speechMs }) {
+                val c = clusters[ci]
+                if (result[ci] != null || c.speechMs < minNewSpeechMs) continue
+                val p = SpeakerProfile(
+                    id = UUID.randomUUID().toString(),
+                    number = next++,
+                    embedding = c.centroid.toList(),
+                    sampleCount = c.count,
+                    totalSpeechMs = c.speechMs,
+                    firstSeenEpochMs = seenAtEpochMs,
+                    lastSeenEpochMs = seenAtEpochMs,
+                )
+                updated += p
+                result[ci] = p.id
+            }
+            start.copy(nextNumber = next, speakers = updated)
         }
         return result.toList()
     }

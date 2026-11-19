@@ -126,18 +126,27 @@ object SpeakerClustering {
 /** Abgleich lokaler Cluster mit den gespeicherten Profilen (vom Transcriber genutzt, nicht Teil des Vertrags). */
 interface SpeakerMatcher {
     /**
-     * Ordnet jedem Cluster eine Profil-ID zu: bestes Profil mit Cosinus ≥ [threshold] (Profil wird mit dem
-     * Cluster nachgeführt), sonst neues Profil „Sprecher N“ – aber nur bei mindestens [minNewSpeechMs]
-     * Sprache (sonst null, damit Störgeräusche keine Profile erzeugen).
+     * Ordnet jedem Cluster einer Datei eine Profil-ID zu.
+     *
+     * - Verglichen werden Zentren mit Profilen (beides Mittelwerte). Deren Cosinus liegt systematisch höher als
+     *   Abschnitt↔Zentrum, daher eine eigene, strengere Schwelle [threshold] (gemessen: gleicher Sprecher ≥ 0,92,
+     *   verschiedene ≤ 0,75).
+     * - Eins-zu-eins je Datei: Das lokale Clustering hat bereits entschieden, dass die Cluster verschiedene
+     *   Sprecher sind; zwei Cluster derselben Datei landen nie im selben Profil, und in dieser Datei neu angelegte
+     *   Profile sind keine Kandidaten.
+     * - Ohne passendes Profil: neues Profil „Sprecher N“, aber nur ab [minNewSpeechMs] Sprache (sonst null).
      */
     suspend fun matchOrCreate(
         clusters: List<ClusterSummary>,
         seenAtEpochMs: Long,
-        threshold: Double = SpeakerClustering.DEFAULT_THRESHOLD,
+        threshold: Double = PROFILE_MATCH_THRESHOLD,
         minNewSpeechMs: Long = MIN_NEW_PROFILE_SPEECH_MS,
     ): List<String?>
 
     companion object {
         const val MIN_NEW_PROFILE_SPEECH_MS = 3_000L
+
+        /** Schwelle Zentrum↔Profil (siehe oben); lokal je Abschnitt gilt [SpeakerClustering.DEFAULT_THRESHOLD]. */
+        const val PROFILE_MATCH_THRESHOLD = 0.82
     }
 }
