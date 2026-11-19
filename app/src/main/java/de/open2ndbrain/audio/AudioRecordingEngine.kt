@@ -104,6 +104,11 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         synchronized(lock) { session?.send(Cmd.Config(config)) }
     }
 
+    /** Nicht blockierend; No-op ohne laufende Aufnahme oder in der Pause. */
+    override fun splitNow(reason: String) {
+        synchronized(lock) { session?.splitNow(reason) }
+    }
+
     private fun publishIdle() {
         _state.update {
             it.copy(
@@ -126,6 +131,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         class Audio(val pcm: ShortArray, val epochMs: Long, val segmentStart: Boolean, val input: String?) : WItem
         data class Event(val type: String, val detail: String?, val atMs: Long) : WItem
         data class Split(val type: String, val detail: String?) : WItem
+        data class SplitNow(val reason: String) : WItem
         data class Close(val type: String) : WItem
         data class Settings(val settings: HourlyWriter.Settings) : WItem
         data object Quit : WItem
@@ -164,6 +170,13 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
 
         fun send(cmd: Cmd) {
             cmds.add(cmd)
+        }
+
+        /** Direkt in die Writer-Warteschlange: Reihenfolge zu den Frames bleibt erhalten, kein Gate-Reset. */
+        fun splitNow(reason: String) {
+            if (paused) return
+            Log.i(TAG, "splitNow: $reason")
+            writerQueue.add(WItem.SplitNow(reason))
         }
 
         fun launch() {
@@ -713,6 +726,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                     }
                     is WItem.Event -> writer.addEvent(item.type, item.detail, item.atMs)
                     is WItem.Split -> writer.split(item.type, item.detail)
+                    is WItem.SplitNow -> writer.splitNow(item.reason)
                     is WItem.Close -> writer.close(item.type)
                     is WItem.Settings -> writer.settings = item.settings
                     WItem.Quit -> Unit

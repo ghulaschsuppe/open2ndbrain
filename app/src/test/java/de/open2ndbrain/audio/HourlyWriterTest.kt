@@ -155,6 +155,31 @@ class HourlyWriterTest {
     }
 
     @Test
+    fun splitNowClosesFileAndContinuesSeamlessly() {
+        val w = writer()
+        val t = at("2026-11-19T10:20:00")
+        w.splitNow("ohne Datei") // nichts offen → No-op, kein vorgemerktes Ereignis
+        w.frames(t, 50)
+        nowMs = t + 1_000
+        w.splitNow("Meeting Budget")
+        val dir = dayDir("2026-11-19T10:00:00")
+        val a = sidecar(File(dir, "2026-11-19_10-00.json")) // sofort abgeschlossen + umbenannt
+        assertTrue(a.complete)
+        assertEquals(listOf("split"), a.events.map { it.type })
+        assertEquals("Meeting Budget", a.events.single().detail)
+        // nahtlos weiter: nächster Frame (lückenlos, ohne segmentStart) öffnet _b
+        for (i in 0 until 25) {
+            nowMs = t + 1_000 + i * 20L
+            w.write(frame, 320, t + 1_000 + i * 20L, false, "mic")
+        }
+        w.close(null)
+        val b = sidecar(File(dir, "2026-11-19_10-00_b.json"))
+        assertEquals(listOf("split"), b.events.map { it.type })
+        assertEquals(listOf(RecordingSidecar.Segment(0, t + 1_000, 500, "mic")), b.segments)
+        assertEquals(listOf(RecordingSidecar.Segment(0, t, 1000, "mic")), a.segments)
+    }
+
+    @Test
     fun pendingEventsFromOtherHoursAreDropped() {
         val w = writer()
         w.addEvent("resumed", null, at("2026-11-19T09:50:00"))

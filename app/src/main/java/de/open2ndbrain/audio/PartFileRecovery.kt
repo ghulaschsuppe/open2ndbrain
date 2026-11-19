@@ -17,6 +17,7 @@ import java.time.ZoneId
  *   sauber abgeschlossen, wird die tatsächliche OGG-Dauer mit den Segmenten abgeglichen (der letzte
  *   Abschnitt wird verlängert) und ein Ereignis `recovered` ergänzt; `complete` bleibt false.
  * - Verwaiste `.tmp`-Dateien werden gelöscht.
+ * - Transkripte (`*.transcript.json*`) werden nie angefasst.
  *
  * Dateien in [skip] (gerade aktiv geschrieben) werden nicht angefasst.
  */
@@ -31,6 +32,7 @@ internal object PartFileRecovery {
             val files = dir.listFiles() ?: return@forEach
             val bases = LinkedHashSet<String>()
             for (f in files) {
+                if (RecordingLayout.isTranscriptFile(f.name)) continue // gehört der Transkription
                 if (f.name.endsWith(".tmp")) {
                     if (f.absolutePath !in skip) f.delete()
                     continue
