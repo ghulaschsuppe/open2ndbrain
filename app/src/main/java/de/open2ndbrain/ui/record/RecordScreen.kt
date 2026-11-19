@@ -76,6 +76,8 @@ import de.open2ndbrain.ui.SystemSettings
 @Composable
 fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val meeting by vm.meeting.collectAsStateWithLifecycle()
+    val transcription by vm.transcription.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var problem by remember { mutableStateOf<Int?>(null) }
     var showMicDialog by remember { mutableStateOf(false) }
@@ -115,6 +117,22 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
             PauseControls(state, onPause = vm::pause, onPauseShort = vm::pauseShort, onResume = vm::resume)
         }
 
+        MeetingCard(
+            meeting = meeting,
+            now = state.now,
+            onStart = {
+                vm.startMeeting()
+                // Läuft keine Aufnahme oder ist sie pausiert: (fort)setzen – Start aus der sichtbaren App ist erlaubt.
+                if (!state.serviceRunning || state.status == DisplayStatus.Paused) {
+                    if (SystemSettings.hasMic(context)) tryStart() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            },
+            onEnd = vm::endMeeting,
+            onRename = vm::setMeetingTitle,
+            onBookmark = vm::bookmark,
+            bookmarkEnabled = state.serviceRunning && state.status != DisplayStatus.Paused,
+        )
+
         problem?.let { msg ->
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Column(Modifier.padding(16.dp)) {
@@ -137,6 +155,8 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
         )
 
         StatsCard(state)
+
+        TranscriptionCard(transcription)
     }
 
     if (showMicDialog) {

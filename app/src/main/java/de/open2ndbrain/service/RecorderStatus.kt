@@ -1,6 +1,7 @@
 package de.open2ndbrain.service
 
 import de.open2ndbrain.core.EngineState
+import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.EngineStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -58,9 +59,14 @@ data class NotificationModel(
     val storedMinutesToday: Long = 0,
     val pausedUntil: Long? = null,
     val errorMessage: String? = null,
+    /** Laufendes Meeting: Dauer in ganzen Minuten (null = kein Meeting). */
+    val meetingMinutes: Long? = null,
+    val meetingTitle: String? = null,
 ) {
+    val meetingActive: Boolean get() = meetingMinutes != null
+
     companion object {
-        fun from(engine: EngineState, service: ServiceStatus, now: Long): NotificationModel {
+        fun from(engine: EngineState, service: ServiceStatus, now: Long, meeting: Marker? = null): NotificationModel {
             val status = displayStatus(engine, service)
             val active = status == DisplayStatus.Recording || status == DisplayStatus.MicBusy
             val elapsed = if (active) engine.sessionStartedAt?.let { ((now - it).coerceAtLeast(0)) / 60_000 } else null
@@ -71,6 +77,8 @@ data class NotificationModel(
                 storedMinutesToday = engine.storedMsToday / 60_000,
                 pausedUntil = if (status == DisplayStatus.Paused) service.pausedUntil else null,
                 errorMessage = if (status == DisplayStatus.Error) engine.errorMessage else null,
+                meetingMinutes = meeting?.let { ((now - it.startEpochMs).coerceAtLeast(0)) / 60_000 },
+                meetingTitle = meeting?.title,
             )
         }
     }

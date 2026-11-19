@@ -3,15 +3,26 @@ package de.open2ndbrain.core
 import android.content.Context
 import de.open2ndbrain.audio.AudioRecordingEngine
 import de.open2ndbrain.audio.FileRecordingRepository
+import de.open2ndbrain.markers.FileMarkerRepository
+import de.open2ndbrain.models.FileModelManager
 import de.open2ndbrain.service.RecorderStatusHolder
 import de.open2ndbrain.settings.SettingsRepository
 import de.open2ndbrain.speakers.FileSpeakerRepository
 import de.open2ndbrain.transcription.FileTranscriptRepository
+import de.open2ndbrain.work.TranscriptionFailures
+import de.open2ndbrain.work.TranscriptionScheduler
+import de.open2ndbrain.work.TranscriptionStatusStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.io.File
 
 /** Einfache manuelle Dependency Injection – eine Instanz pro Prozess (siehe [de.open2ndbrain.O2bApp]). */
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
+
+    /** Prozessweiter Scope für kurze Aufgaben, die eine Komponente (Kachel, Benachrichtigung) überleben sollen. */
+    val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val audioRoot: File = File(appContext.filesDir, "audio").apply { mkdirs() }
 
@@ -27,7 +38,23 @@ class AppContainer(context: Context) {
 
     val transcripts: TranscriptRepository by lazy { FileTranscriptRepository(audioRoot, recordings) }
 
-    // ModelManager, TranscriptionStatusHolder und der Transcriber-Aufbau werden vom App-Agenten ergänzt.
+    /** Sprachmodelle (Download/Import/Löschen); [models] ist die Vertragssicht. */
+    val modelManager: FileModelManager by lazy {
+        FileModelManager(appContext, modelsRoot) { transcriptionScheduler.schedule() }
+    }
+    val models: ModelManager get() = modelManager
+
+    /** Status der Transkription für UI/Benachrichtigung; [transcriptionStatus] ist auch ein [TranscriptionStatusHolder]. */
+    val transcriptionStatus: TranscriptionStatusStore by lazy { TranscriptionStatusStore() }
+
+    val transcriptionFailures: TranscriptionFailures by lazy {
+        TranscriptionFailures(File(appContext.filesDir, "transcription-failures.json"))
+    }
+
+    val transcriptionScheduler: TranscriptionScheduler by lazy { TranscriptionScheduler(appContext, this) }
+
+    /** Meetings und Lesezeichen. */
+    val markers: FileMarkerRepository by lazy { FileMarkerRepository(File(appContext.filesDir, "markers")) }
 
     /** Zustand des Aufnahmedienstes (läuft/pausiert) für UI und Kachel. */
     val recorderStatus: RecorderStatusHolder by lazy { RecorderStatusHolder() }

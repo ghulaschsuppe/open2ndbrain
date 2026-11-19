@@ -88,14 +88,14 @@ class ServiceLogicTest {
     @Test
     fun onboardingStepsPerVersion() {
         assertEquals(
-            listOf(OnboardingStep.Legal, OnboardingStep.Microphone, OnboardingStep.Battery),
+            listOf(OnboardingStep.Legal, OnboardingStep.Microphone, OnboardingStep.Models, OnboardingStep.Battery),
             onboardingSteps(29),
         )
         assertEquals(
-            listOf(OnboardingStep.Legal, OnboardingStep.Microphone, OnboardingStep.Bluetooth, OnboardingStep.Battery),
+            listOf(OnboardingStep.Legal, OnboardingStep.Microphone, OnboardingStep.Bluetooth, OnboardingStep.Models, OnboardingStep.Battery),
             onboardingSteps(31),
         )
-        assertEquals(5, onboardingSteps(36).size)
+        assertEquals(6, onboardingSteps(36).size)
     }
 
     @Test

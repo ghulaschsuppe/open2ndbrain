@@ -27,14 +27,24 @@ data class PlayerState(
 class RecordingPlayer(private val scope: CoroutineScope) {
     private var player: MediaPlayer? = null
     private var progressJob: Job? = null
+    private var pendingSeekMs: Long? = null
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
 
-    fun play(file: File) {
+    /** Spielt [file] ab; gleiche Datei ohne [startMs] → Pause/Weiter umschalten, mit [startMs] → dorthin springen. */
+    fun play(file: File, startMs: Long? = null) {
         if (_state.value.file == file && player != null) {
-            toggle()
+            if (startMs == null) {
+                toggle()
+            } else if (_state.value.prepared) {
+                seekTo(startMs)
+                if (player?.isPlaying == false) toggle()
+            } else {
+                pendingSeekMs = startMs
+            }
             return
         }
+        pendingSeekMs = startMs
         release()
         _state.value = PlayerState(file = file)
         val mp = MediaPlayer()
@@ -49,6 +59,11 @@ class RecordingPlayer(private val scope: CoroutineScope) {
             mp.setDataSource(file.path)
             mp.setOnPreparedListener {
                 _state.update { s -> s.copy(prepared = true, durationMs = it.duration.toLong().coerceAtLeast(0)) }
+                pendingSeekMs?.let { ms ->
+                    it.seekTo(ms.toInt())
+                    _state.update { s -> s.copy(positionMs = ms) }
+                }
+                pendingSeekMs = null
                 it.start()
                 onPlaying(true)
             }

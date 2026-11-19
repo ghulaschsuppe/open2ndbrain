@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
@@ -47,11 +48,14 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import de.open2ndbrain.O2bApp
 import de.open2ndbrain.R
+import de.open2ndbrain.ui.Formatters
+import de.open2ndbrain.ui.settings.ALL_MODELS_BYTES
 import de.open2ndbrain.ui.SystemSettings
 import de.open2ndbrain.ui.settings.BatteryBlock
 
-enum class OnboardingStep { Legal, Microphone, Notifications, Bluetooth, Battery }
+enum class OnboardingStep { Legal, Microphone, Notifications, Bluetooth, Models, Battery }
 
 /** Schritte je nach Android-Version: Benachrichtigungen erst ab 13, Bluetooth-Verbindung ab 12. */
 fun onboardingSteps(sdk: Int): List<OnboardingStep> = buildList {
@@ -59,6 +63,7 @@ fun onboardingSteps(sdk: Int): List<OnboardingStep> = buildList {
     add(OnboardingStep.Microphone)
     if (sdk >= Build.VERSION_CODES.TIRAMISU) add(OnboardingStep.Notifications)
     if (sdk >= Build.VERSION_CODES.S) add(OnboardingStep.Bluetooth)
+    add(OnboardingStep.Models)
     add(OnboardingStep.Battery)
 }
 
@@ -134,6 +139,8 @@ fun OnboardingScreen(onFinished: () -> Unit, modifier: Modifier = Modifier) {
                 onNext = ::next,
             )
 
+            OnboardingStep.Models -> ModelsStep(onNext = ::next)
+
             OnboardingStep.Battery -> {
                 StepHeader(Icons.Filled.BatteryChargingFull, stringResource(R.string.onb_battery_title))
                 Text(stringResource(R.string.onb_battery_text), style = MaterialTheme.typography.bodyLarge)
@@ -208,4 +215,32 @@ private fun PermissionStep(
 private fun StepHeader(icon: ImageVector, title: String) {
     Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
     Text(title, style = MaterialTheme.typography.headlineSmall)
+}
+
+/** Optional: Sprachmodelle gleich laden (läuft im Hintergrund weiter, kann übersprungen werden). */
+@Composable
+private fun ModelsStep(onNext: () -> Unit) {
+    val context = LocalContext.current
+    val manager = remember { (context.applicationContext as O2bApp).container.modelManager }
+    var started by rememberSaveable { mutableStateOf(false) }
+    StepHeader(Icons.Filled.Translate, stringResource(R.string.onb_models_title))
+    Text(stringResource(R.string.onb_models_text, Formatters.bytes(ALL_MODELS_BYTES)), style = MaterialTheme.typography.bodyLarge)
+    if (started) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.onb_models_started))
+        }
+        Button(onClick = onNext, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.onb_next)) }
+    } else {
+        Button(onClick = {
+            manager.downloadAll(unmeteredOnly = true)
+            started = true
+        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.models_download_wifi)) }
+        TextButton(onClick = {
+            manager.downloadAll(unmeteredOnly = false)
+            started = true
+        }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.models_download_mobile)) }
+        TextButton(onClick = onNext, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.onb_skip)) }
+    }
 }
