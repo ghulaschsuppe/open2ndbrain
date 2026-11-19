@@ -36,6 +36,12 @@ data class AppSettings(
     val pausedUntilEpochMs: Long = 0,
     /** Letzter Lauf der Aufbewahrungs-Löschung (epoch ms). */
     val lastRetentionRunEpochMs: Long = 0,
+    /** Wann transkribiert wird. */
+    val transcriptionMode: TranscriptionMode = TranscriptionMode.Automatic,
+    /** Sprechererkennung gewünscht (wirkt nur, wenn das Modell installiert ist). */
+    val speakerRecognition: Boolean = true,
+    /** CPU-Threads für die Transkription: 2 oder 4. */
+    val transcriptionThreads: Int = DEFAULT_THREADS,
 ) {
     fun toEngineConfig(outputRoot: File): EngineConfig = EngineConfig(
         outputRoot = outputRoot,
@@ -58,11 +64,17 @@ data class AppSettings(
 
         const val PAUSED_INDEFINITELY = Long.MAX_VALUE
 
+        const val DEFAULT_THREADS = 4
+        val THREAD_OPTIONS = listOf(2, DEFAULT_THREADS)
+
         /** Würde der Wechsel der Aufbewahrung von [old] auf [new] Tage sofort mehr Audio löschen? */
         fun retentionShortens(old: Int, new: Int): Boolean =
             new != RETENTION_UNLIMITED && (old == RETENTION_UNLIMITED || new < old)
     }
 }
+
+/** Wann die Transkription laufen darf. */
+enum class TranscriptionMode { Automatic, ChargingOnly, Off }
 
 /** Kodierung von [MicPreference] als String für DataStore. */
 object MicPreferenceCodec {
@@ -100,6 +112,9 @@ internal object SettingsKeys {
     val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
     val PAUSED_UNTIL = longPreferencesKey("paused_until")
     val LAST_RETENTION_RUN = longPreferencesKey("last_retention_run")
+    val TRANSCRIPTION_MODE = stringPreferencesKey("transcription_mode")
+    val SPEAKER_RECOGNITION = booleanPreferencesKey("speaker_recognition")
+    val TRANSCRIPTION_THREADS = intPreferencesKey("transcription_threads")
 
     fun toAppSettings(p: Preferences): AppSettings {
         val defaults = AppSettings()
@@ -114,6 +129,11 @@ internal object SettingsKeys {
             onboardingDone = p[ONBOARDING_DONE] ?: defaults.onboardingDone,
             pausedUntilEpochMs = p[PAUSED_UNTIL]?.coerceAtLeast(0) ?: 0,
             lastRetentionRunEpochMs = p[LAST_RETENTION_RUN] ?: 0,
+            transcriptionMode = TranscriptionMode.entries.firstOrNull { it.name == p[TRANSCRIPTION_MODE] }
+                ?: defaults.transcriptionMode,
+            speakerRecognition = p[SPEAKER_RECOGNITION] ?: defaults.speakerRecognition,
+            transcriptionThreads = p[TRANSCRIPTION_THREADS]?.takeIf { it in AppSettings.THREAD_OPTIONS }
+                ?: defaults.transcriptionThreads,
         )
     }
 }
@@ -171,5 +191,18 @@ class SettingsRepository(context: Context) {
 
     suspend fun setLastRetentionRun(epochMs: Long) {
         store.edit { it[SettingsKeys.LAST_RETENTION_RUN] = epochMs }
+    }
+
+    suspend fun setTranscriptionMode(mode: TranscriptionMode) {
+        store.edit { it[SettingsKeys.TRANSCRIPTION_MODE] = mode.name }
+    }
+
+    suspend fun setSpeakerRecognition(value: Boolean) {
+        store.edit { it[SettingsKeys.SPEAKER_RECOGNITION] = value }
+    }
+
+    suspend fun setTranscriptionThreads(threads: Int) {
+        require(threads in AppSettings.THREAD_OPTIONS) { "Ungültige Threadzahl: $threads" }
+        store.edit { it[SettingsKeys.TRANSCRIPTION_THREADS] = threads }
     }
 }
