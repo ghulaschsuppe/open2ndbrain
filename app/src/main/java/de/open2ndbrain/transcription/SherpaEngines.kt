@@ -10,12 +10,24 @@ import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
+import de.open2ndbrain.core.ModelLoadException
 import java.io.File
 
 /** Prüft Modelldateien vor dem Laden (die native Bibliothek bricht bei fehlenden Dateien sonst hart ab). */
 internal fun requireModelFile(f: File): String {
-    check(f.isFile && f.length() > 0) { "Modelldatei fehlt: ${f.name}" }
+    if (!f.isFile || f.length() <= 0) throw ModelLoadException("Modelldatei fehlt: ${f.name}")
     return f.absolutePath
+}
+
+/** Native Modell-Ladefehler (auch UnsatisfiedLinkError) → [ModelLoadException]; OutOfMemoryError läuft durch. */
+internal inline fun <T> loadModel(what: String, block: () -> T): T = try {
+    block()
+} catch (e: ModelLoadException) {
+    throw e
+} catch (e: Exception) {
+    throw ModelLoadException("$what nicht ladbar: ${e.message ?: e.javaClass.simpleName}", e)
+} catch (e: LinkageError) {
+    throw ModelLoadException("$what nicht ladbar (native Bibliothek): ${e.message}", e)
 }
 
 /** Silero-VAD über sherpa-onnx; eine Instanz pro Datei (Positionen beginnen bei 0). */
@@ -26,7 +38,7 @@ internal class SherpaSegmenter(
     threshold: Float = 0.5f,
     minSpeechSec: Float = 0.25f,
 ) : Segmenter {
-    private val vad = Vad(
+    private val vad = loadModel("Silero-VAD") { Vad(
         null,
         VadModelConfig().apply {
             sileroVadModelConfig = SileroVadModelConfig().apply {
@@ -41,7 +53,7 @@ internal class SherpaSegmenter(
             numThreads = 1
             provider = "cpu"
         },
-    )
+    ) }
     private val window = FloatArray(WINDOW)
     private var fill = 0
     private val segments = ArrayList<SampleRange>()
@@ -94,7 +106,7 @@ internal class SherpaSegmenter(
 
 /** Parakeet TDT (NeMo-Transducer) über den OfflineRecognizer, greedy. */
 internal class SherpaRecognizer(modelDir: File, numThreads: Int) : Recognizer, AutoCloseable {
-    private val recognizer = OfflineRecognizer(
+    private val recognizer = loadModel("Parakeet") { OfflineRecognizer(
         null,
         OfflineRecognizerConfig().apply {
             featConfig = FeatureConfig().apply {
@@ -115,7 +127,7 @@ internal class SherpaRecognizer(modelDir: File, numThreads: Int) : Recognizer, A
             }
             decodingMethod = "greedy_search"
         },
-    )
+    ) }
 
     override fun recognize(samples: FloatArray): List<RawToken> {
         val stream = recognizer.createStream()
@@ -143,10 +155,9 @@ internal class SherpaRecognizer(modelDir: File, numThreads: Int) : Recognizer, A
 
 /** WeSpeaker-ResNet34-Stimmabdruck. */
 internal class SherpaEmbedder(modelFile: File, numThreads: Int) : Embedder, AutoCloseable {
-    private val extractor = SpeakerEmbeddingExtractor(
-        null,
-        SpeakerEmbeddingExtractorConfig(requireModelFile(modelFile), numThreads, false, "cpu"),
-    )
+    private val extractor = loadModel("WeSpeaker") {
+        SpeakerEmbeddingExtractor(null, SpeakerEmbeddingExtractorConfig(requireModelFile(modelFile), numThreads, false, "cpu"))
+    }
 
     override fun embed(samples: FloatArray): FloatArray? {
         val stream = extractor.createStream()

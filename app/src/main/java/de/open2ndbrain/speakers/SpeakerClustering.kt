@@ -200,21 +200,50 @@ object SpeakerClustering {
 /** Ein Cluster einer Datei und – falls erkannt – das bekannte Profil, zu dem er gehört. */
 data class ClusterAssignment(val cluster: ClusterSummary, val profileId: String?)
 
+/**
+ * Vorgemerkte Sprecheränderungen einer Datei. Wird erst angewendet ([SpeakerMatcher.apply]), nachdem das
+ * Transkript geschrieben ist – bei Abbruch oder Fehler entstehen so keine Profile.
+ */
+data class SpeakerUpdate(val entries: List<Entry>) {
+    data class Entry(val profileId: String, val isNew: Boolean, val cluster: ClusterSummary)
+}
+
+object SpeakerPlanning {
+    /**
+     * Legt die Profil-IDs je Cluster fest: erkannte Cluster behalten die Profil-ID, unerkannte bekommen eine neue ID
+     * (nur ab [minNewSpeechMs] Sprache, sonst null). Speichert nichts.
+     */
+    fun plan(
+        assignments: List<ClusterAssignment>,
+        minNewSpeechMs: Long = SpeakerMatcher.MIN_NEW_PROFILE_SPEECH_MS,
+        newId: () -> String = { java.util.UUID.randomUUID().toString() },
+    ): Pair<List<String?>, SpeakerUpdate> {
+        val ids = arrayOfNulls<String>(assignments.size)
+        val entries = ArrayList<SpeakerUpdate.Entry>()
+        // große Cluster zuerst: neue Profile bekommen in dieser Reihenfolge ihre Nummern
+        for (i in assignments.indices.sortedByDescending { assignments[it].cluster.speechMs }) {
+            val a = assignments[i]
+            val id = a.profileId ?: if (a.cluster.speechMs >= minNewSpeechMs) newId() else null
+            if (id != null) {
+                ids[i] = id
+                entries += SpeakerUpdate.Entry(id, isNew = a.profileId == null, cluster = a.cluster)
+            }
+        }
+        return ids.toList() to SpeakerUpdate(entries)
+    }
+}
+
 /** Zugriff des Transcribers auf die Profile (nicht Teil des Vertrags). */
 interface SpeakerMatcher {
     /** Bekannte Profile (ID, normiertes Embedding) als Start-Cluster für [SpeakerClustering.clusterSeeded]. */
     suspend fun knownProfiles(): List<Pair<String, FloatArray>>
 
     /**
-     * Übernimmt das Ergebnis einer Datei: Cluster mit [ClusterAssignment.profileId] werden in dieses Profil
-     * eingerechnet (Aliasse werden aufgelöst, falls inzwischen zusammengeführt); übrige werden neue Profile
-     * „Sprecher N“, aber nur ab [minNewSpeechMs] Sprache (sonst null). Rückgabe: Profil-ID je Cluster.
+     * Wendet die Änderungen einer Datei an. Idempotent je [audioFileName]: Wird eine Datei erneut transkribiert,
+     * ersetzt ihr Beitrag den früheren (Statistik wird abgezogen, das Embedding nicht doppelt eingerechnet).
+     * Inzwischen zusammengeführte Profile werden über Aliasse gefunden, gelöschte übersprungen.
      */
-    suspend fun commit(
-        assignments: List<ClusterAssignment>,
-        seenAtEpochMs: Long,
-        minNewSpeechMs: Long = MIN_NEW_PROFILE_SPEECH_MS,
-    ): List<String?>
+    suspend fun apply(update: SpeakerUpdate, audioFileName: String, seenAtEpochMs: Long)
 
     companion object {
         const val MIN_NEW_PROFILE_SPEECH_MS = 3_000L

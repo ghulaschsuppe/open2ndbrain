@@ -57,7 +57,6 @@ class SherpaIntegrationTest {
                     speakerSegmenter = { SherpaSegmenter(vad, minSilenceSec = 0.25f, maxSpeechSec = 8f) },
                     embedder = emb,
                     speakers = repo,
-                    seenAtEpochMs = start,
                 )
                 // Runde 1: neue Profile; Runde 2/3: Wiedererkennung über Dateien, keine neuen Profile
                 var profilesAfterFirst = 0
@@ -67,6 +66,9 @@ class SherpaIntegrationTest {
                     val mapper = FileTimeMapper(listOf(RecordingSidecar.Segment(0, start, pcm.size / 16L)), start)
                     val t0 = System.currentTimeMillis()
                     val result = pipeline.run(source, mapper, pcm.size.toLong()) {}
+                    // wie SherpaTranscriber: Profile erst nach dem (hier gedachten) Schreiben ändern; Runde 3 = Datei 1
+                    // erneut → ersetzt deren Beitrag (idempotent)
+                    result.speakerUpdate?.let { u -> runBlocking { repo.apply(u, if (round == 2 && wav2 != null) "datei2" else "datei1", start) } }
                     val secs = (System.currentTimeMillis() - t0) / 1000.0
                     println("Runde $round: Audio ${pcm.size / 16_000} s, Rechenzeit %.1f s, RTF %.3f".format(secs, secs / (pcm.size / 16_000.0)))
                     if (round == 1) {

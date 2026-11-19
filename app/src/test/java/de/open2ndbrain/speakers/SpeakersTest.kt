@@ -106,13 +106,50 @@ class FileSpeakerRepositoryTest {
 
     private fun repo(dir: File = tmp.root) = FileSpeakerRepository(dir, now = { 42 })
 
-    /** Eine „Datei“: Abschnitte der Sprecher (je 2 s), voller Ablauf Seeds → Clustering → commit. */
-    private suspend fun FileSpeakerRepository.file(speakers: List<Int>, seen: Long, segMs: Long = 2_000): Map<Int, String?> {
+    /** Eine „Datei“: Abschnitte der Sprecher (je 2 s), voller Ablauf Seeds → Clustering → Plan → apply. */
+    private suspend fun FileSpeakerRepository.file(
+        speakers: List<Int>,
+        seen: Long,
+        segMs: Long = 2_000,
+        name: String = "f$seen.ogg",
+        apply: Boolean = true,
+    ): Map<Int, String?> {
         val known = knownProfiles()
         val items = speakers.map { SpeakerClustering.Item(voices.sample(it), segMs) }
         val r = SpeakerClustering.clusterSeeded(items, known.map { it.second })
-        val ids = commit(r.clusters.mapIndexed { k, c -> ClusterAssignment(c, r.seedOf[k]?.let { known[it].first }) }, seen)
+        val (ids, update) = SpeakerPlanning.plan(r.clusters.mapIndexed { k, c -> ClusterAssignment(c, r.seedOf[k]?.let { known[it].first }) })
+        if (apply) apply(update, name, seen)
         return speakers.withIndex().groupBy({ it.value }, { ids[r.labels[it.index]] }).mapValues { (_, l) -> l.first() }
+    }
+
+    @Test
+    fun nothingIsPersistedUntilApplied() = runBlocking {
+        val r = repo()
+        val ids = r.file(listOf(0, 0, 1, 1), seen = 1_000, apply = false) // z. B. Abbruch vor dem Schreiben
+        assertNotNull(ids[0])
+        assertTrue(r.observeSpeakers().first().isEmpty())
+        assertFalse(File(tmp.root, "speakers.json").exists())
+    }
+
+    @Test
+    fun reTranscribingSameFileIsIdempotent() = runBlocking {
+        val r = repo()
+        val first = r.file(listOf(0, 0, 1, 1, 0), seen = 1_000, name = "a.ogg")
+        val before = r.observeSpeakers().first()
+        repeat(3) { assertEquals(first, r.file(listOf(0, 0, 1, 1, 0), seen = 1_000, name = "a.ogg")) }
+        val after = r.observeSpeakers().first()
+        assertEquals(before.map { it.sampleCount to it.totalSpeechMs }, after.map { it.sampleCount to it.totalSpeechMs })
+        // Embedding wird nicht erneut eingerechnet
+        assertEquals(before.map { it.embedding }, after.map { it.embedding })
+        // andere Datei zählt dagegen dazu
+        r.file(listOf(0, 0), seen = 2_000, name = "b.ogg")
+        assertEquals(5, r.resolve(first[0]!!)!!.sampleCount)
+        // nach Merge bleibt Neu-Transkribieren idempotent (Beitrag folgt dem Alias)
+        r.merge(fromId = first[1]!!, intoId = first[0]!!)
+        val merged = r.resolve(first[0]!!)!!
+        r.file(listOf(0, 0, 0), seen = 1_000, name = "a.ogg") // nur noch eine Stimme erkannt
+        val again = r.resolve(first[0]!!)!!
+        assertEquals(merged.sampleCount - 5 + 3, again.sampleCount)
     }
 
     @Test
@@ -144,19 +181,20 @@ class FileSpeakerRepositoryTest {
     }
 
     @Test
-    fun commitFollowsAliasAndSurvivesDeletedProfile() = runBlocking {
+    fun applyFollowsAliasAndSkipsDeletedProfile() = runBlocking {
         val r = repo()
         val ids = r.file(listOf(0, 0, 1, 1), seen = 1_000)
         val known = r.knownProfiles()
         r.merge(fromId = ids[1]!!, intoId = ids[0]!!)
         // Seed-Zuordnung zeigt noch auf die alte ID → landet im zusammengeführten Profil
         val c = ClusterSummary(known.first { it.first == ids[1] }.second, 2, 4_000)
-        assertEquals(listOf(ids[0]), r.commit(listOf(ClusterAssignment(c, ids[1])), 2_000))
+        val countBefore = r.resolve(ids[0]!!)!!.sampleCount
+        r.apply(SpeakerUpdate(listOf(SpeakerUpdate.Entry(ids[1]!!, false, c))), "x.ogg", 2_000)
+        assertEquals(countBefore + 2, r.resolve(ids[0]!!)!!.sampleCount)
         r.delete(ids[0]!!)
-        // gelöschtes Profil → neues Profil (genug Sprache)
-        val n = r.commit(listOf(ClusterAssignment(c, ids[0])), 3_000).single()
-        assertNotNull(n)
-        assertNotEquals(ids[0], n)
+        // gelöschtes Profil wird nicht wieder angelegt
+        r.apply(SpeakerUpdate(listOf(SpeakerUpdate.Entry(ids[0]!!, false, c))), "y.ogg", 3_000)
+        assertTrue(r.observeSpeakers().first().isEmpty())
     }
 
     @Test

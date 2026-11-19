@@ -4,6 +4,8 @@ import de.open2ndbrain.core.Utterance
 import de.open2ndbrain.speakers.ClusterAssignment
 import de.open2ndbrain.speakers.SpeakerClustering
 import de.open2ndbrain.speakers.SpeakerMatcher
+import de.open2ndbrain.speakers.SpeakerPlanning
+import de.open2ndbrain.speakers.SpeakerUpdate
 import kotlinx.coroutines.runBlocking
 
 /** Sprachabschnitts-Erkennung (VAD) über einen Strom; eine Instanz pro Datei. */
@@ -26,7 +28,13 @@ internal interface Embedder {
     fun embed(samples: FloatArray): FloatArray?
 }
 
-internal class PipelineResult(val utterances: List<Utterance>, val decodedSamples: Long, val speakersUsed: Boolean)
+internal class PipelineResult(
+    val utterances: List<Utterance>,
+    val decodedSamples: Long,
+    val speakersUsed: Boolean,
+    /** Vorgemerkte Profiländerungen; erst nach dem Schreiben des Transkripts anwenden. */
+    val speakerUpdate: SpeakerUpdate? = null,
+)
 
 /**
  * Ablauf je Datei (zwei Dekodier-Durchläufe, nie die ganze Datei im RAM):
@@ -34,7 +42,8 @@ internal class PipelineResult(val utterances: List<Utterance>, val decodedSample
  * 2. ASR-Blöcke planen ([BlockPlanner]); erneut dekodieren, Blöcke und Sprecherabschnitte einsammeln
  *    ([RangeCollector]), sobald vollständig: ASR bzw. Embedding.
  * 3. Sprecher clustern – mit den bekannten Profilen als Start-Cluster ([SpeakerClustering.clusterSeeded]) –,
- *    Ergebnis in die Profile übernehmen ([SpeakerMatcher.commit]), Tokens zuordnen, Äußerungen bilden.
+ *    IDs vormerken ([SpeakerPlanning.plan]), Tokens zuordnen, Äußerungen bilden. Die Profile ändert erst der Aufrufer
+ *    nach dem Schreiben des Transkripts ([SpeakerMatcher.apply] mit [PipelineResult.speakerUpdate]).
  */
 internal class TranscriptionPipeline(
     private val recognizer: Recognizer,
@@ -43,8 +52,6 @@ internal class TranscriptionPipeline(
     private val embedder: Embedder?,
     /** null → Sprecher werden nur innerhalb der Datei unterschieden (keine IDs). */
     private val speakers: SpeakerMatcher?,
-    /** Zeitpunkt für `lastSeen` der Profile (i. d. R. Ende der Aufnahme). */
-    private val seenAtEpochMs: Long = System.currentTimeMillis(),
 ) {
     private class StopReading : RuntimeException() {
         override fun fillInStackTrace(): Throwable = this
@@ -116,14 +123,17 @@ internal class TranscriptionPipeline(
         checkInterrupted()
 
         // --- Sprecher
+        var update: SpeakerUpdate? = null
         val speakerAt: (Long) -> String? = if (useSpeakers && embeddings.isNotEmpty()) {
-            assignSpeakers(spkSegs, embeddings)
+            val (fn, u) = assignSpeakers(spkSegs, embeddings)
+            update = u
+            fn
         } else {
             { null }
         }
         val utterances = UtteranceBuilder.build(tokens, mapper, speakerAt)
         progress.report(1f, force = true)
-        return PipelineResult(utterances, total, useSpeakers)
+        return PipelineResult(utterances, total, useSpeakers, update)
     }
 
     private sealed interface Tag {
@@ -131,8 +141,8 @@ internal class TranscriptionPipeline(
         data class Speaker(val index: Int) : Tag
     }
 
-    /** Liefert eine Funktion Dateizeit (ms) → Sprecher-ID. */
-    private fun assignSpeakers(segs: List<SampleRange>, embeddings: Map<Int, FloatArray>): (Long) -> String? {
+    /** Liefert eine Funktion Dateizeit (ms) → Sprecher-ID und die vorgemerkten Profiländerungen. */
+    private fun assignSpeakers(segs: List<SampleRange>, embeddings: Map<Int, FloatArray>): Pair<(Long) -> String?, SpeakerUpdate?> {
         val idx = embeddings.keys.sorted()
         val known = speakers?.let { runBlocking { it.knownProfiles() } }.orEmpty()
         val result = SpeakerClustering.clusterSeeded(
@@ -140,7 +150,7 @@ internal class TranscriptionPipeline(
             known.map { it.second },
         )
         val assignments = result.clusters.mapIndexed { k, c -> ClusterAssignment(c, result.seedOf[k]?.let { known[it].first }) }
-        val ids = speakers?.let { runBlocking { it.commit(assignments, seenAtEpochMs) } } ?: List(assignments.size) { null }
+        val (ids, update) = if (speakers != null) SpeakerPlanning.plan(assignments) else List(assignments.size) { null } to null
         val segIds = arrayOfNulls<String>(segs.size)
         idx.forEachIndexed { k, segIndex -> segIds[segIndex] = ids.getOrNull(result.labels[k]) }
         // Kurze Abschnitte (ohne eigenes Embedding): Sprecher der Nachbarn übernehmen – wenn beide Nachbarn
@@ -163,7 +173,7 @@ internal class TranscriptionPipeline(
             }
         }
         val starts = LongArray(segs.size) { segs[it].start }
-        return { ms ->
+        return Pair({ ms: Long ->
             val s = msToSamples(ms)
             // letzter Abschnitt mit start ≤ s
             var lo = 0
@@ -190,7 +200,7 @@ internal class TranscriptionPipeline(
                     if (cand != null && d <= msToSamples(PAUSE_ASSIGN_MAX_MS)) segIds[cand] else null
                 }
             }
-        }
+        }, update)
     }
 
     private fun fraction(done: Long, total: Long): Float =
