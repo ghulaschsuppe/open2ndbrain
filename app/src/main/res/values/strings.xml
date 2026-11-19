@@ -414,6 +414,34 @@ Namensnennung: %2$s</string>
     <string name="retranscribe_more_models">Weitere Modelle</string>
     <string name="retranscribe_start">Starten</string>
     <string name="transcript_made_with">Transkribiert mit %1$s · %2$s</string>
+    <string name="asr_subtitle_bytes">Modelle belegen %1$s</string>
+    <string name="models_others_hint">Werden unabhängig vom gewählten Spracherkennungsmodell genutzt.</string>
+    <string name="models_chosen">Gewählt</string>
+    <string name="models_chosen_pending">Gewählt – wird aktiv, sobald es geladen ist. Bis dahin transkribiert %1$s weiter.</string>
+    <string name="models_chosen_pending_none">Gewählt – wird aktiv, sobald es geladen ist.</string>
+    <string name="models_active_fallback">Läuft weiter, bis %1$s geladen ist.</string>
+    <string name="models_delete_active_title">Aktives Modell</string>
+    <string name="models_delete_active_text">Dieses Modell wird gerade verwendet. Aktiviere zuerst ein anderes Modell, dann kannst du es löschen.</string>
+    <string name="models_import_done">Fertig.</string>
+    <string name="upgrade_title">Besseres Deutsch-Modell verfügbar (%1$s)</string>
+    <string name="upgrade_text">„%1$s“ erkennt Alltagsgespräche genauer und rechnet deutlich schneller. Bis der Download fertig ist, läuft dein bisheriges Modell weiter.</string>
+    <string name="upgrade_accept">Laden (WLAN)</string>
+    <string name="retranscribe_offer_title">Ältere Transkripte neu erstellen?</string>
+    <string name="retranscribe_offer_text">Neue Aufnahmen transkribiert ab jetzt „%1$s“. Sollen auch ältere Transkripte damit neu erstellt werden?</string>
+    <string name="retranscribe_offer_yes">Neu erstellen</string>
+    <string name="retranscribe_offer_no">Nein, nur neue</string>
+    <string name="retranscribe_offer_estimating">Schätze Rechenzeit …</string>
+    <string name="retranscribe_offer_nothing">In diesem Zeitraum gibt es keine Transkripte.</string>
+    <string name="retranscribe_offer_estimate">ca. %1$s Rechenzeit</string>
+    <plurals name="retranscribe_offer_files">
+        <item quantity="one">%1$d Aufnahme · %2$s Audio</item>
+        <item quantity="other">%1$d Aufnahmen · %2$s Audio</item>
+    </plurals>
+    <plurals name="retranscribe_days">
+        <item quantity="one">Letzter Tag</item>
+        <item quantity="other">Letzte %1$d Tage</item>
+    </plurals>
+    <string name="retranscribe_offer_hint">Läuft im Hintergrund, neue Aufnahmen haben Vorrang. Bisherige Transkripte bleiben bis zur Fertigstellung lesbar.</string>
     <string name="transcription_last_run">Letzter Lauf: %1$s</string>
     <string name="transcription_load">Laden %1$s</string>
     <string name="transcription_device">Gerät: %1$s</string>

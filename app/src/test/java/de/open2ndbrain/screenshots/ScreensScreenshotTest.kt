@@ -21,7 +21,10 @@ import androidx.compose.ui.unit.dp
 import de.open2ndbrain.ui.recordings.RetranscribeSheetContent
 import de.open2ndbrain.ui.settings.AsrModelsContent
 import de.open2ndbrain.ui.settings.LinkSetting
-import de.open2ndbrain.ui.settings.ModelItemUi
+import de.open2ndbrain.ui.models.AsrModelItem
+import de.open2ndbrain.ui.settings.RetranscribeOfferContent
+import de.open2ndbrain.work.Retranscription
+import androidx.compose.foundation.layout.size
 import de.open2ndbrain.ui.settings.ModelsActions
 import de.open2ndbrain.ui.settings.ModelsUi
 import de.open2ndbrain.ui.onboarding.OnboardingScreen
@@ -147,20 +150,40 @@ class ScreensScreenshotTest {
     private fun Models() = AsrModelsContent(
         ui = ModelsUi(
             asr = listOf(
-                ModelItemUi(ModelCatalog.DE_FASTCONFORMER, ModelState.Installed(File("/x"))),
-                ModelItemUi(ModelCatalog.CANARY_180M_DE, ModelState.Downloading(88_000_000, 207_170_046)),
-                ModelItemUi(ModelCatalog.PARAKEET_V3, ModelState.Installed(File("/x"))),
-                ModelItemUi(ModelCatalog.WHISPER_SMALL, ModelState.NotInstalled),
+                AsrModelItem(ModelCatalog.DE_FASTCONFORMER, ModelState.Downloading(88_000_000, 131_663_631), 88_000_000, false, chosen = true, active = false),
+                AsrModelItem(ModelCatalog.CANARY_180M_DE, ModelState.NotInstalled, 0, false, chosen = false, active = false),
+                AsrModelItem(ModelCatalog.PARAKEET_V3, ModelState.Installed(File("/x")), 0, false, chosen = false, active = true),
+                AsrModelItem(ModelCatalog.WHISPER_SMALL, ModelState.Installed(File("/x")), 0, false, chosen = false, active = false),
             ),
             others = listOf(
-                ModelItemUi(ModelCatalog.SILERO_VAD, ModelState.Installed(File("/x"))),
-                ModelItemUi(ModelCatalog.WESPEAKER_RESNET34, ModelState.NotInstalled),
+                ModelCatalog.SILERO_VAD to ModelState.Installed(File("/x")),
+                ModelCatalog.WESPEAKER_RESNET34 to ModelState.NotInstalled,
             ),
-            activeAsrId = ModelCatalog.DE_FASTCONFORMER.id,
+            installedBytes = 1_090_000_000,
         ),
-        actions = ModelsActions(onActivate = {}),
+        actions = ModelsActions(),
         onBack = {},
     )
+
+    @Test fun neuErstellenAngebot() = compose.snapshot("8-neu-erstellen-angebot", dark = false) {
+        androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().padding(24.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
+            androidx.compose.material3.Surface(
+                shape = androidx.compose.material3.MaterialTheme.shapes.extraLarge,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(24.dp)) {
+                    androidx.compose.material3.Text("Ältere Transkripte neu erstellen?", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall)
+                    androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.size(16.dp))
+                    RetranscribeOfferContent(
+                        modelName = ModelCatalog.DE_FASTCONFORMER.displayName,
+                        days = 7,
+                        onDays = {},
+                        estimate = Retranscription.Estimate(files = 23, audioMs = 9L * 3_600_000 + 20 * 60_000, estimatedMs = 26 * 60_000),
+                    )
+                }
+            }
+        }
+    }
 
     @Config(qualifiers = "w400dp-h3000dp-xhdpi")
     @Test fun modelleDunkel() = compose.snapshot("8-spracherkennung", dark = true) { Models() }

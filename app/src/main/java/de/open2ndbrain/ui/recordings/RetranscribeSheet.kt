@@ -1,6 +1,8 @@
 package de.open2ndbrain.ui.recordings
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -110,15 +112,20 @@ fun RetranscribeSheetContent(
                 if (current) Pill(stringResource(R.string.retranscribe_current))
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = Spacing.sm, bottom = Spacing.md), verticalAlignment = Alignment.CenterVertically) {
-            if (onOpenModels != null) TextButton(onClick = onOpenModels) { Text(stringResource(R.string.retranscribe_more_models)) }
-            Spacer(Modifier.weight(1f))
+        if (onOpenModels != null) {
+            TextButton(onClick = onOpenModels, modifier = Modifier.padding(top = Spacing.xxs)) {
+                Text(stringResource(R.string.retranscribe_more_models))
+            }
+        }
+        FlowRow(
+            Modifier.fillMaxWidth().padding(top = Spacing.xs, bottom = Spacing.md),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.End),
+        ) {
             TextButton(onClick = onCancel) { Text(stringResource(R.string.cancel)) }
-            Spacer(Modifier.width(Spacing.xs))
             Button(onClick = { choice?.let(onPick) }, enabled = choice != null) {
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(Spacing.xs))
-                Text(stringResource(R.string.retranscribe_start))
+                Text(stringResource(R.string.retranscribe_start), maxLines = 1)
             }
         }
     }

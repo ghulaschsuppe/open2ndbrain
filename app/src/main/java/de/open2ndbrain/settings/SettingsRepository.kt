@@ -44,6 +44,10 @@ data class AppSettings(
     val transcriptionThreads: Int = DEFAULT_THREADS,
     /** Abschnittslänge für die Transkription in Minuten (Takt für `splitNow`): 10/15/30/60. */
     val transcriptionIntervalMin: Int = DEFAULT_INTERVAL_MIN,
+    /** Gewähltes Spracherkennungsmodell; null = nie gewählt (Standard bzw. Bestandsmodell, siehe AsrSelection). */
+    val asrModelId: String? = null,
+    /** Vorschlag „besseres Deutsch-Modell“ wurde ausgeblendet. */
+    val asrSuggestionDismissed: Boolean = false,
 ) {
     /** Tatsächlich genutzte Threads für [cores] verfügbare Prozessorkerne. */
     fun effectiveThreads(cores: Int = Runtime.getRuntime().availableProcessors()): Int =
@@ -135,6 +139,8 @@ internal object SettingsKeys {
     val SPEAKER_RECOGNITION = booleanPreferencesKey("speaker_recognition")
     val TRANSCRIPTION_THREADS = intPreferencesKey("transcription_threads")
     val TRANSCRIPTION_INTERVAL = intPreferencesKey("transcription_interval_min")
+    val ASR_MODEL = stringPreferencesKey("asr_model_id")
+    val ASR_SUGGESTION_DISMISSED = booleanPreferencesKey("asr_suggestion_dismissed")
 
     fun toAppSettings(p: Preferences): AppSettings {
         val defaults = AppSettings()
@@ -156,6 +162,8 @@ internal object SettingsKeys {
                 ?: defaults.transcriptionThreads,
             transcriptionIntervalMin = p[TRANSCRIPTION_INTERVAL]?.takeIf { it in AppSettings.INTERVAL_OPTIONS }
                 ?: defaults.transcriptionIntervalMin,
+            asrModelId = p[ASR_MODEL],
+            asrSuggestionDismissed = p[ASR_SUGGESTION_DISMISSED] ?: false,
         )
     }
 }
@@ -221,6 +229,14 @@ class SettingsRepository(context: Context) {
 
     suspend fun setSpeakerRecognition(value: Boolean) {
         store.edit { it[SettingsKeys.SPEAKER_RECOGNITION] = value }
+    }
+
+    suspend fun setAsrModel(id: String) {
+        store.edit { it[SettingsKeys.ASR_MODEL] = id }
+    }
+
+    suspend fun dismissAsrSuggestion() {
+        store.edit { it[SettingsKeys.ASR_SUGGESTION_DISMISSED] = true }
     }
 
     suspend fun setTranscriptionInterval(minutes: Int) {

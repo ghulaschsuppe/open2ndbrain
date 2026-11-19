@@ -106,7 +106,7 @@ object SampleData {
 
     val transcript = Transcript(
         audioFileName = h14.audio.name,
-        asrModelId = "parakeet-tdt-0.6b-v3",
+        asrModelId = de.open2ndbrain.core.ModelCatalog.DE_FASTCONFORMER.id,
         speakerModelId = "wespeaker",
         createdAtEpochMs = at(today, 15, 2),
         audioDurationMs = h14.durationMs,

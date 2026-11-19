@@ -4,6 +4,7 @@ import android.util.Log
 import de.open2ndbrain.core.AppContainer
 import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.ModelState
+import de.open2ndbrain.models.AsrSelection
 import de.open2ndbrain.work.RunDecision
 import de.open2ndbrain.work.TranscriptionPlanner
 import de.open2ndbrain.work.TranscriptionRunner
@@ -52,7 +53,7 @@ class ServiceTranscription(private val c: AppContainer) {
         val s = c.settings.current()
         val b = c.transcriptionScheduler.battery.value
         val states = c.modelManager.states.value
-        val ready = states[ModelCatalog.PARAKEET_V3.id] is ModelState.Installed && states[ModelCatalog.SILERO_VAD.id] is ModelState.Installed
+        val ready = AsrSelection.ready(states)
         return TranscriptionPlanner.runDecision(s.transcriptionMode, ready, b.charging, b.percent, runner.forceRequested)
     }
 

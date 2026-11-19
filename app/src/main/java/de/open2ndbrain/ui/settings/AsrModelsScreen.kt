@@ -57,6 +57,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.open2ndbrain.R
+import de.open2ndbrain.ui.models.AsrModelItem
+import de.open2ndbrain.ui.models.ModelsViewModel
+import de.open2ndbrain.ui.components.StatusDot
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.ButtonDefaults
 import de.open2ndbrain.core.AsrBenchmark
 import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.ModelKind
@@ -75,76 +82,94 @@ import de.open2ndbrain.ui.theme.Spacing
 import de.open2ndbrain.ui.theme.tabular
 import java.util.Locale
 
-/** Ein Modell mit seinem Zustand (UI-Sicht; wird aus dem ViewModel befüllt). */
-@Immutable
-data class ModelItemUi(
-    val spec: ModelSpec,
-    val state: ModelState,
-    val presentBytes: Long = 0,
-    val waitingForNetwork: Boolean = false,
-)
-
-/** Alles, was die Seite „Spracherkennung“ zeigt. */
+/** Alles, was die Seite „Spracherkennung“ zeigt (aus dem [ModelsViewModel]). */
 @Immutable
 data class ModelsUi(
-    val asr: List<ModelItemUi>,
-    val others: List<ModelItemUi>,
-    /** Aktives Spracherkennungsmodell; null = noch nicht bekannt/keins. */
-    val activeAsrId: String?,
+    val asr: List<AsrModelItem>,
+    val others: List<Pair<ModelSpec, ModelState>>,
+    val installedBytes: Long = 0,
+    val upgrade: ModelSpec? = null,
     val importState: ImportState? = null,
 )
 
-/** Aktionen der Modellseite. [onActivate] = null blendet „Aktivieren“ aus (noch nicht verdrahtet). */
+/** Aktionen der Modellseite. */
 class ModelsActions(
     val onDownload: (ModelSpec, unmeteredOnly: Boolean) -> Unit = { _, _ -> },
     val onCancel: (String) -> Unit = {},
-    val onDelete: (String) -> Unit = {},
-    val onActivate: ((String) -> Unit)? = null,
+    /** false = nicht löschbar (aktives Modell). */
+    val onDelete: (String) -> Boolean = { true },
+    val onActivate: (String) -> Unit = {},
+    val onAcceptUpgrade: (unmeteredOnly: Boolean) -> Unit = {},
+    val onDismissUpgrade: () -> Unit = {},
     val onImport: (List<android.net.Uri>) -> Unit = {},
-    val onClearImport: () -> Unit = {},
 )
 
-/** Verdrahtung mit dem bestehenden [SettingsViewModel] (bis das ModelsViewModel des App-Agenten da ist). */
+/** Seite „Spracherkennung“, verdrahtet mit dem [ModelsViewModel] des App-Agenten. */
 @Composable
-fun AsrModelsScreen(vm: SettingsViewModel, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val states by vm.modelStates.collectAsStateWithLifecycle()
-    val present by vm.presentBytes.collectAsStateWithLifecycle()
-    val waiting by vm.waitingForNetwork.collectAsStateWithLifecycle()
+fun AsrModelsScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: ModelsViewModel = viewModel()) {
+    val asr by vm.asrModels.collectAsStateWithLifecycle()
+    val others by vm.otherModels.collectAsStateWithLifecycle()
+    val bytes by vm.installedBytes.collectAsStateWithLifecycle()
+    val upgrade by vm.upgradeSuggestion.collectAsStateWithLifecycle()
     val importState by vm.importState.collectAsStateWithLifecycle()
-    fun item(spec: ModelSpec) = ModelItemUi(spec, states[spec.id] ?: ModelState.NotInstalled, present[spec.id] ?: 0L, spec.id in waiting)
+    val offer by vm.offerRetranscribe.collectAsStateWithLifecycle()
+
     AsrModelsContent(
-        ui = ModelsUi(
-            asr = ModelCatalog.asrModels.map(::item),
-            others = ModelCatalog.all.filter { it.kind != ModelKind.Asr }.map(::item),
-            activeAsrId = null,
-            importState = importState,
-        ),
+        ui = ModelsUi(asr, others, bytes, upgrade, importState),
         actions = ModelsActions(
             onDownload = { spec, wifi -> vm.download(spec.id, wifi) },
             onCancel = vm::cancel,
-            onDelete = { vm.deleteModel(it) },
+            onDelete = vm::delete,
+            onActivate = { vm.activate(it) },
+            onAcceptUpgrade = vm::acceptUpgrade,
+            onDismissUpgrade = { vm.dismissUpgrade() },
             onImport = vm::import,
-            onClearImport = vm::clearImport,
         ),
         onBack = onBack,
         modifier = modifier,
     )
+
+    if (offer) {
+        val activeName = asr.firstOrNull { it.active }?.spec?.displayName.orEmpty()
+        RetranscribeOfferDialog(
+            modelName = activeName,
+            estimate = { days -> vm.estimateRecent(days) },
+            onConfirm = { vm.retranscribeRecent(it) },
+            onDismiss = vm::dismissRetranscribeOffer,
+        )
+    }
 }
 
 /** Seite „Spracherkennung“: Erklärung, Karten je Modell mit Genauigkeit/Tempo, weitere Modelle, Import. */
 @Composable
 fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    var askDownload by remember { mutableStateOf<ModelItemUi?>(null) }
+    var askDownload by remember { mutableStateOf<Pair<ModelSpec, Long>?>(null) }
     var askDelete by remember { mutableStateOf<ModelSpec?>(null) }
+    var cannotDelete by remember { mutableStateOf(false) }
+    val activeName = ui.asr.firstOrNull { it.active }?.spec?.displayName
+    val chosenName = ui.asr.firstOrNull { it.chosen }?.spec?.displayName
 
     Column(modifier.fillMaxSize()) {
-        DetailTopBar(stringResource(R.string.asr_title), onBack = onBack, subtitle = stringResource(R.string.asr_subtitle))
+        DetailTopBar(
+            stringResource(R.string.asr_title),
+            onBack = onBack,
+            subtitle = if (ui.installedBytes > 0) {
+                stringResource(R.string.asr_subtitle_bytes, Formatters.bytes(ui.installedBytes))
+            } else {
+                stringResource(R.string.asr_subtitle)
+            },
+        )
         WidthAware(Modifier.fillMaxSize()) { side ->
             LazyColumn(
                 Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = side + Spacing.md, end = side + Spacing.md, bottom = Spacing.xl),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
+                ui.upgrade?.let { spec ->
+                    item(key = "upgrade") {
+                        UpgradeCard(spec, onAccept = actions.onAcceptUpgrade, onDismiss = actions.onDismissUpgrade)
+                    }
+                }
                 item(key = "intro") { IntroCard() }
                 item(key = "asr-label") {
                     SectionLabel(stringResource(R.string.asr_section), modifier = Modifier.padding(start = Spacing.xs, top = Spacing.sm))
@@ -152,11 +177,12 @@ fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, m
                 items(ui.asr, key = { it.spec.id }) { m ->
                     AsrModelCard(
                         item = m,
-                        active = m.spec.id == ui.activeAsrId,
-                        onDownload = { askDownload = m },
+                        activeName = activeName,
+                        chosenName = chosenName,
+                        onDownload = { askDownload = m.spec to m.presentBytes },
                         onCancel = { actions.onCancel(m.spec.id) },
                         onDelete = { askDelete = m.spec },
-                        onActivate = actions.onActivate?.let { a -> { a(m.spec.id) } },
+                        onActivate = { actions.onActivate(m.spec.id) },
                     )
                 }
                 item(key = "others-label") {
@@ -164,16 +190,22 @@ fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, m
                 }
                 item(key = "others") {
                     O2bCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = Spacing.xs)) {
-                        ui.others.forEachIndexed { i, m ->
-                            if (i > 0) SettingDivider()
+                        Text(
+                            stringResource(R.string.models_others_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs),
+                        )
+                        ui.others.forEach { (spec, state) ->
+                            SettingDivider()
                             ModelRow(
-                                spec = m.spec,
-                                state = m.state,
-                                presentBytes = m.presentBytes,
-                                waitingForNetwork = m.waitingForNetwork,
-                                onDownload = { askDownload = m },
-                                onCancel = { actions.onCancel(m.spec.id) },
-                                onDelete = { askDelete = m.spec },
+                                spec = spec,
+                                state = state,
+                                presentBytes = 0,
+                                waitingForNetwork = false,
+                                onDownload = { askDownload = spec to 0L },
+                                onCancel = { actions.onCancel(spec.id) },
+                                onDelete = { askDelete = spec },
                             )
                         }
                     }
@@ -183,15 +215,15 @@ fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, m
         }
     }
 
-    askDownload?.let { m ->
+    askDownload?.let { (spec, present) ->
         DownloadDialog(
-            sizeBytes = m.spec.sizeBytes - m.presentBytes,
+            sizeBytes = spec.sizeBytes - present,
             onWifi = {
-                actions.onDownload(m.spec, true)
+                actions.onDownload(spec, true)
                 askDownload = null
             },
             onAnyNetwork = {
-                actions.onDownload(m.spec, false)
+                actions.onDownload(spec, false)
                 askDownload = null
             },
             onDismiss = { askDownload = null },
@@ -204,11 +236,19 @@ fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, m
             text = { Text(stringResource(R.string.models_delete_text, spec.displayName)) },
             confirmButton = {
                 TextButton(onClick = {
-                    actions.onDelete(spec.id)
+                    if (!actions.onDelete(spec.id)) cannotDelete = true
                     askDelete = null
                 }) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { askDelete = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+    if (cannotDelete) {
+        AlertDialog(
+            onDismissRequest = { cannotDelete = false },
+            title = { Text(stringResource(R.string.models_delete_active_title)) },
+            text = { Text(stringResource(R.string.models_delete_active_text)) },
+            confirmButton = { TextButton(onClick = { cannotDelete = false }) { Text(stringResource(R.string.close)) } },
         )
     }
 }
@@ -231,46 +271,114 @@ private fun IntroCard() {
     }
 }
 
-/** Karte eines Spracherkennungsmodells. */
+/**
+ * Wechsel-Vorschlag für Bestandsinstallationen („Neues, besseres Deutsch-Modell verfügbar“).
+ * Wird im Jetzt-Tab und oben auf der Modellseite gezeigt. [onOpen] (optional) führt zur Modellseite.
+ */
+@Composable
+fun UpgradeCard(
+    spec: ModelSpec,
+    onAccept: (unmeteredOnly: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+    onOpen: (() -> Unit)? = null,
+) {
+    val extra = O2bTheme.extra
+    O2bCard(
+        modifier.fillMaxWidth(),
+        color = extra.meetingContainer.copy(alpha = 0.7f),
+        border = BorderStroke(1.dp, extra.meeting.copy(alpha = 0.4f)),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = extra.meeting)
+            Spacer(Modifier.width(Spacing.sm))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(stringResource(R.string.upgrade_title, Formatters.bytes(spec.sizeBytes)), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.upgrade_text, spec.displayName), style = MaterialTheme.typography.bodySmall)
+                spec.benchmark?.let { b ->
+                    Text(
+                        stringResource(R.string.rating_accuracy) + ": " + stringResource(ModelRatings.accuracy(b).label) +
+                            " · " + stringResource(R.string.rating_speed) + ": " + stringResource(ModelRatings.speed(b).label),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = extra.meeting,
+                    )
+                }
+            }
+        }
+        FlowRow(
+            Modifier.fillMaxWidth().padding(top = Spacing.sm),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xxs),
+        ) {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.model_hint_later)) }
+            if (onOpen != null) OutlinedButton(onClick = onOpen) { Text(stringResource(R.string.model_hint_open)) }
+            Button(
+                onClick = { onAccept(true) },
+                colors = ButtonDefaults.buttonColors(containerColor = extra.meeting, contentColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(Spacing.xs))
+                Text(stringResource(R.string.upgrade_accept))
+            }
+        }
+    }
+}
+
+/** Karte eines Spracherkennungsmodells – „gewählt“ und „aktiv“ werden getrennt sichtbar gemacht. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AsrModelCard(
-    item: ModelItemUi,
-    active: Boolean,
+    item: AsrModelItem,
+    activeName: String?,
+    chosenName: String?,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
     onDelete: () -> Unit,
-    onActivate: (() -> Unit)?,
+    onActivate: () -> Unit,
 ) {
     val spec = item.spec
     val scheme = MaterialTheme.colorScheme
     val extra = O2bTheme.extra
-    val installed = item.state is ModelState.Installed
+    val pendingChoice = item.chosen && !item.active
     O2bCard(
         Modifier.fillMaxWidth().animateContentSize(),
-        border = if (active) BorderStroke(1.5.dp, scheme.primary) else BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.55f)),
+        border = when {
+            item.active -> BorderStroke(1.5.dp, scheme.primary)
+            pendingChoice -> BorderStroke(1.5.dp, scheme.secondary)
+            else -> BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.55f))
+        },
     ) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-            if (spec.recommended) {
-                Pill(
-                    stringResource(R.string.models_recommended),
-                    icon = Icons.Filled.Star,
-                    container = extra.meetingContainer,
-                    content = extra.onMeetingContainer,
-                )
+        val badges = spec.recommended || item.active || item.chosen || item.installed
+        if (badges) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                if (item.active) {
+                    Pill(
+                        stringResource(R.string.models_active),
+                        leading = { StatusDot(extra.success) },
+                        container = scheme.primaryContainer,
+                        content = scheme.onPrimaryContainer,
+                    )
+                }
+                if (pendingChoice) {
+                    Pill(
+                        stringResource(R.string.models_chosen),
+                        icon = Icons.Filled.Schedule,
+                        container = scheme.secondaryContainer,
+                        content = scheme.onSecondaryContainer,
+                    )
+                }
+                if (spec.recommended) {
+                    Pill(
+                        stringResource(R.string.models_recommended),
+                        icon = Icons.Filled.Star,
+                        container = extra.meetingContainer,
+                        content = extra.onMeetingContainer,
+                    )
+                }
+                if (item.installed && !item.active) Pill(stringResource(R.string.models_installed))
             }
-            if (active) {
-                Pill(
-                    stringResource(R.string.models_active),
-                    icon = Icons.Filled.CheckCircle,
-                    container = scheme.primaryContainer,
-                    content = scheme.onPrimaryContainer,
-                )
-            } else if (installed) {
-                Pill(stringResource(R.string.models_installed))
-            }
+            Spacer(Modifier.height(Spacing.xs))
         }
-        if (spec.recommended || active || installed) Spacer(Modifier.height(Spacing.xs))
         Text(spec.displayName, style = MaterialTheme.typography.titleMedium)
         Text(
             "${spec.languages} · ${Formatters.bytes(spec.sizeBytes)}",
@@ -292,30 +400,48 @@ fun AsrModelCard(
             )
         }
 
+        // Hinweis, wenn Wahl und tatsächlicher Einsatz auseinanderfallen
+        val note = when {
+            pendingChoice && activeName != null -> stringResource(R.string.models_chosen_pending, activeName)
+            pendingChoice -> stringResource(R.string.models_chosen_pending_none)
+            item.active && !item.chosen && chosenName != null -> stringResource(R.string.models_active_fallback, chosenName)
+            item.active -> stringResource(R.string.models_active_hint)
+            else -> null
+        }
+        if (note != null) {
+            Row(
+                Modifier
+                    .padding(top = Spacing.sm)
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.small)
+                    .background(if (item.active) scheme.primaryContainer.copy(alpha = 0.4f) else scheme.secondaryContainer.copy(alpha = 0.5f))
+                    .padding(Spacing.sm),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    if (item.active) Icons.Filled.CheckCircle else Icons.Filled.Schedule,
+                    contentDescription = null,
+                    tint = if (item.active) extra.success else scheme.secondary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(Spacing.xs))
+                Text(note, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
         Spacer(Modifier.height(Spacing.sm))
         when (val st = item.state) {
-            is ModelState.Installed -> Row(verticalAlignment = Alignment.CenterVertically) {
-                if (active) {
-                    Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = extra.success, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(Spacing.xs))
-                    Text(
-                        stringResource(R.string.models_active_hint),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = scheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    if (onActivate != null) {
-                        Button(onClick = onActivate, modifier = Modifier.heightIn(min = 44.dp)) {
-                            Text(stringResource(R.string.models_activate))
-                        }
+            is ModelState.Installed -> if (!item.active) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = onActivate, modifier = Modifier.heightIn(min = 44.dp)) {
+                        Text(stringResource(R.string.models_activate))
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onDelete) { Text(stringResource(R.string.delete), color = scheme.error) }
+                    if (item.deletable) TextButton(onClick = onDelete) { Text(stringResource(R.string.delete), color = scheme.error) }
                 }
             }
             is ModelState.Downloading -> {
-                val fraction = st.bytesDone.toFloat() / st.bytesTotal.coerceAtLeast(1)
+                val fraction = item.downloadProgress ?: 0f
                 LinearProgressIndicator(
                     progress = { fraction },
                     modifier = Modifier.fillMaxWidth(),
@@ -362,7 +488,7 @@ fun AsrModelCard(
                     Spacer(Modifier.width(Spacing.xs))
                     Text(label)
                 }
-                if (spec.recommended) {
+                if (spec.recommended || item.chosen) {
                     Button(onClick = onDownload, modifier = Modifier.heightIn(min = 44.dp)) { buttonContent() }
                 } else {
                     FilledTonalButton(onClick = onDownload, modifier = Modifier.heightIn(min = 44.dp)) { buttonContent() }
@@ -420,7 +546,7 @@ private fun ImportCard(state: ImportState?, actions: ModelsActions) {
                 }
                 is ImportState.Done -> {
                     state.results.forEach { r -> Text(importText(r), style = MaterialTheme.typography.bodySmall) }
-                    TextButton(onClick = actions.onClearImport) { Text(stringResource(R.string.close)) }
+                    Text(stringResource(R.string.models_import_done), style = MaterialTheme.typography.labelSmall)
                 }
                 null -> OutlinedButton(onClick = { launcher.launch(arrayOf("*/*")) }, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text(stringResource(R.string.models_import_button))

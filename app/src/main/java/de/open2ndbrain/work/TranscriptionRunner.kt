@@ -13,6 +13,7 @@ import de.open2ndbrain.core.TranscriberConfig
 import de.open2ndbrain.core.Transcript
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.markers.MarkerLogic
+import de.open2ndbrain.models.AsrSelection
 import de.open2ndbrain.transcription.SherpaTranscriber
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -53,8 +54,11 @@ class TranscriptionRunner(
 
     /** Abhängigkeiten (für Tests austauschbar). */
     interface Deps {
-        /** Transcriber-Konfiguration oder null, wenn Pflichtmodelle fehlen. */
-        suspend fun config(): TranscriberConfig?
+        /**
+         * Konfiguration für diese Datei (gewähltes bzw. für „Mit diesem Modell neu transkribieren“ vorgemerktes
+         * Modell) oder null, wenn Pflichtmodelle fehlen.
+         */
+        suspend fun configFor(rec: RecordingFile): TranscriberConfig?
         fun newTranscriber(config: TranscriberConfig): Transcriber
         /** Offene Dateien in Verarbeitungsreihenfolge (Meetings zuerst, dauerhaft fehlerhafte ausgefiltert). */
         suspend fun pending(): List<RecordingFile>
@@ -105,14 +109,23 @@ class TranscriptionRunner(
         }
         holderRef.set(origin)
         var transcriber: Transcriber? = null
+        var currentConfig: TranscriberConfig? = null
         var processed = 0
         try {
-            val config = deps.config() ?: return Result.ModelMissing
             var first = true
             while (canContinue()) {
                 val pending = deps.pending()
                 val rec = pending.firstOrNull() ?: break
                 val remaining = pending.size
+                val config = deps.configFor(rec) ?: return Result.ModelMissing
+                // Anderes Modell (Einstellung geändert oder Vergleich mit anderem Modell): alten Transcriber schließen.
+                if (transcriber != null && config != currentConfig) {
+                    val old = transcriber
+                    transcriber = null
+                    runCatching { withContext(compute) { old?.close() } }
+                    first = true
+                }
+                currentConfig = config
                 deps.updateStatus { it.copy(running = true, currentFile = rec.audio.name, progress = 0f, pendingCount = remaining, waitingReason = null) }
                 onProgress(rec.audio.name, 0f, remaining)
                 val t = transcriber ?: deps.newTranscriber(config).also { transcriber = it }
@@ -201,15 +214,19 @@ class TranscriptionRunner(
 class ContainerRunnerDeps(context: Context, private val c: AppContainer) : TranscriptionRunner.Deps {
     private val appContext = context.applicationContext
 
-    override suspend fun config(): TranscriberConfig? {
+    override suspend fun configFor(rec: RecordingFile): TranscriberConfig? {
         val s = c.settings.current()
-        val asrDir = c.modelManager.installedDir(ModelCatalog.PARAKEET_V3.id) ?: return null
+        val installed = AsrSelection.installedIds(c.modelManager.states.value)
+        // Vorgemerktes Vergleichsmodell, sonst das gewählte (bzw. installierte Ersatz-) Modell
+        val asrId = c.transcriptionOverrides.modelFor(rec.audio)?.takeIf { it in installed }
+            ?: AsrSelection.effective(s.asrModelId, installed)
+        val spec = ModelCatalog.byId(asrId) ?: return null
+        val asrDir = c.modelManager.installedDir(asrId) ?: return null
         val vad = c.modelManager.installedFile(ModelCatalog.SILERO_VAD) ?: return null
         val speaker = if (s.speakerRecognition) c.modelManager.installedFile(ModelCatalog.WESPEAKER_RESNET34) else null
         withContext(Dispatchers.IO) { c.transcriptionFailures.pruneMissing() }
         val threads = s.effectiveThreads()
-        Log.i("TranscriptionRunner", "Gerät: ${TranscriptionStats.deviceDescription()}, Threads: $threads")
-        return TranscriberConfig(asrDir, vad, speaker, threads)
+        return TranscriberConfig(asrDir, vad, speaker, threads, asrModel = spec)
     }
 
     override fun newTranscriber(config: TranscriberConfig): Transcriber = SherpaTranscriber(appContext, config, c.speakers)
@@ -217,13 +234,17 @@ class ContainerRunnerDeps(context: Context, private val c: AppContainer) : Trans
     override suspend fun pending(): List<RecordingFile> {
         val pending = withContext(Dispatchers.IO) { c.transcripts.pending() }
             .filterNot { c.transcriptionFailures.isBlocked(it.audio) }
-        return MarkerLogic.prioritize(pending, c.markers.current(), System.currentTimeMillis())
+        val ordered = MarkerLogic.prioritize(pending, c.markers.current(), System.currentTimeMillis())
+        // Vom Nutzer angestoßene Vergleiche („Mit diesem Modell neu transkribieren“) zuerst
+        val (overridden, rest) = ordered.partition { c.transcriptionOverrides.modelFor(it.audio) != null }
+        return overridden + rest
     }
 
     override fun updateStatus(transform: (TranscriptionStatus) -> TranscriptionStatus) = c.transcriptionStatus.update(transform)
 
     override fun onTranscribed(rec: RecordingFile, transcript: Transcript, loadMs: Long, threads: Int, origin: TranscriptionRunner.Origin) {
         c.transcriptionFailures.clear(rec.audio)
+        c.transcriptionOverrides.clear(rec.audio)
         val stat = TranscriptionRunStat(
             atEpochMs = System.currentTimeMillis(),
             audioFileName = transcript.audioFileName,
@@ -233,12 +254,13 @@ class ContainerRunnerDeps(context: Context, private val c: AppContainer) : Trans
             threads = threads,
             origin = origin.name.lowercase(),
             device = TranscriptionStats.deviceDescription(),
+            asrModelId = transcript.asrModelId,
         )
         c.transcriptionStats.add(stat)
         Log.i(
             "TranscriptionRunner",
             "${stat.audioFileName}: RTF ${stat.realTimeFactor}, Audio ${stat.audioMs} ms, Rechenzeit ${stat.processingMs} ms, " +
-                "Laden ${stat.loadMs} ms, Threads $threads, ${stat.origin}",
+                "Laden ${stat.loadMs} ms, Threads $threads, Modell ${stat.asrModelId}, ${stat.origin}, ${stat.device}",
         )
     }
 

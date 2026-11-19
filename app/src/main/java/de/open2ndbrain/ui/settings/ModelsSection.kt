@@ -54,8 +54,7 @@ import de.open2ndbrain.ui.theme.Spacing
 import de.open2ndbrain.ui.theme.tabular
 
 /** Größe der empfohlenen Grundausstattung (empfohlenes Spracherkennungsmodell, VAD, Sprechererkennung). */
-val ALL_MODELS_BYTES: Long get() =
-    (ModelCatalog.asrModels.filter { it.recommended } + ModelCatalog.all.filter { it.kind != ModelKind.Asr }).sumOf { it.sizeBytes }
+val ALL_MODELS_BYTES: Long get() = de.open2ndbrain.models.AsrSelection.RECOMMENDED_BYTES
 
 /** Eintrag in den Einstellungen: öffnet die Seite „Spracherkennung“, mit kurzer Zusammenfassung. */
 @Composable

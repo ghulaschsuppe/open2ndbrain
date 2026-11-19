@@ -63,14 +63,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import de.open2ndbrain.O2bApp
 import de.open2ndbrain.R
 import de.open2ndbrain.core.ModelCatalog
-import de.open2ndbrain.core.ModelSpec
-import de.open2ndbrain.core.ModelState
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.ui.platform.LocalContext
 import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MarkerType
 import de.open2ndbrain.core.RecordingFile
@@ -114,10 +110,8 @@ fun RecordingDetail(recording: RecordingFile, vm: RecordingsViewModel, modifier:
     var confirmDelete by remember { mutableStateOf(false) }
     var editBookmark by remember { mutableStateOf<Marker?>(null) }
     var pickModel by remember { mutableStateOf(false) }
-    val installedAsr = rememberInstalledAsrModels()
-    // TODO(App-Agent): mit ModelsViewModel/RecordingsViewModel „Mit diesem Modell neu transkribieren“ verdrahten.
-    // Solange null, bleibt der Menüpunkt ausgeblendet (nicht mit dem aktiven Modell verwechseln).
-    val retranscribeWith: ((String) -> Unit)? = null
+    val installedAsr by vm.installedAsrModels.collectAsStateWithLifecycle()
+    val retranscribeWith: ((String) -> Unit)? = { id -> vm.retranscribeWith(recording, id) }
     val audioExists = recording.audio.exists()
     val bookmarks = remember(markers, recording) { MarkerLogic.bookmarksIn(recording, markers) }
     val badge = data?.badges?.get(recording.audio.path) ?: TranscriptBadge.None
@@ -197,14 +191,6 @@ fun RecordingDetail(recording: RecordingFile, vm: RecordingsViewModel, modifier:
             onDismiss = { pickModel = false },
         )
     }
-}
-
-/** Installierte Spracherkennungsmodelle (für das Auswahl-Sheet). */
-@Composable
-fun rememberInstalledAsrModels(): List<ModelSpec> {
-    val context = LocalContext.current
-    val states by remember { (context.applicationContext as O2bApp).container.modelManager.states }.collectAsStateWithLifecycle()
-    return remember(states) { ModelCatalog.asrModels.filter { states[it.id] is ModelState.Installed } }
 }
 
 /** Unauffällige Herkunftsangabe: „Transkribiert mit Deutsch – schnell · 19.11.2025, 15:02“. */
@@ -321,6 +307,8 @@ fun MeetingDetail(meeting: Marker, vm: RecordingsViewModel, modifier: Modifier) 
     val markers by vm.markers.collectAsStateWithLifecycle()
     val chargingOnly by vm.chargingOnly.collectAsStateWithLifecycle()
     var edit by remember { mutableStateOf(false) }
+    var pickModel by remember { mutableStateOf(false) }
+    val installedAsr by vm.installedAsrModels.collectAsStateWithLifecycle()
     val pending = data?.let { vm.meetingPendingFiles(meeting, it) } ?: 0
     val bookmarks = remember(markers, meeting) {
         markers.filter { it.type == MarkerType.Bookmark && MarkerLogic.overlaps(MarkerLogic.markerRange(meeting, System.currentTimeMillis()), MarkerLogic.markerRange(it, it.endEpochMs ?: it.startEpochMs)) }
@@ -341,9 +329,19 @@ fun MeetingDetail(meeting: Marker, vm: RecordingsViewModel, modifier: Modifier) 
         onSeek = vm.player::seekTo,
         onClosePlayer = vm.player::close,
         modifier = modifier,
+        onRetranscribeWith = if (installedAsr.isNotEmpty() && meeting.endEpochMs != null) ({ pickModel = true }) else null,
     )
 
     if (edit) MarkerEditDialog(meeting, vm, onDismiss = { edit = false })
+    if (pickModel) {
+        RetranscribeSheet(
+            installed = installedAsr,
+            currentModelId = null,
+            onPick = { vm.retranscribeMeetingWith(meeting, it) },
+            onOpenModels = null,
+            onDismiss = { pickModel = false },
+        )
+    }
 }
 
 /** Zustandslose Meeting-Ansicht (auch für Previews/Screenshots). */

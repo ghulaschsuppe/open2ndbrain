@@ -99,7 +99,7 @@ fun SettingsScreen(
     BackHandler(enabled = page != SettingsPage.Main) { page = SettingsPage.Main }
     when (page) {
         SettingsPage.Licenses -> LicensesScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
-        SettingsPage.Models -> AsrModelsScreen(vm, onBack = { page = SettingsPage.Main }, modifier = modifier)
+        SettingsPage.Models -> AsrModelsScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
         SettingsPage.Main -> SettingsMain(modifier, vm, onOpen = { page = it })
     }
 }
