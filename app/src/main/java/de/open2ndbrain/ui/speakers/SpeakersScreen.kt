@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -34,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,15 +53,14 @@ import de.open2ndbrain.core.SpeakerProfile
 import de.open2ndbrain.ui.Formatters
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class SpeakersViewModel(application: Application) : AndroidViewModel(application) {
     private val speakers = (application as O2bApp).container.speakers
 
+    /** Alle Profile (null = wird geladen). */
     val list: StateFlow<List<SpeakerProfile>?> = speakers.observeSpeakers()
-        .map { l -> l.sortedWith(compareByDescending<SpeakerProfile> { it.isMe }.thenByDescending { it.lastSeenEpochMs }) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun rename(id: String, name: String?) = viewModelScope.launch { speakers.rename(id, name?.trim()?.ifEmpty { null }) }
@@ -89,6 +91,7 @@ fun SpeakerDot(profile: SpeakerProfile?, modifier: Modifier = Modifier) {
 fun SpeakersScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: SpeakersViewModel = viewModel()) {
     val list by vm.list.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<SpeakerProfile?>(null) }
+    var showRare by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
@@ -103,30 +106,54 @@ fun SpeakersScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: Speake
                 modifier = Modifier.padding(24.dp),
             )
         }
+        val (main, rare) = remember(l) { SpeakerDirectory.splitForDisplay(l.orEmpty()) }
         LazyColumn(Modifier.fillMaxSize()) {
-            items(l.orEmpty(), key = { it.id }) { p ->
-                ListItem(
-                    modifier = Modifier.clickable { selected = p },
-                    leadingContent = { SpeakerDot(p, Modifier.size(20.dp)) },
-                    headlineContent = {
-                        Text(if (p.isMe) "${speakerName(p)} · ${stringResource(R.string.speaker_me)}" else speakerName(p))
-                    },
-                    supportingContent = {
-                        Text(
-                            stringResource(
-                                R.string.speaker_details,
-                                Formatters.duration(p.totalSpeechMs),
-                                Formatters.dateTime(p.lastSeenEpochMs),
-                            ),
-                        )
-                    },
-                )
-                HorizontalDivider()
+            if (!l.isNullOrEmpty()) {
+                item(key = "hint") {
+                    Text(
+                        stringResource(R.string.speakers_cleanup_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            items(main, key = { it.id }) { p -> SpeakerRow(p) { selected = p } }
+            if (rare.isNotEmpty()) {
+                item(key = "rare-header") {
+                    ListItem(
+                        modifier = Modifier.clickable { showRare = !showRare },
+                        headlineContent = { Text(stringResource(R.string.speakers_rare, rare.size)) },
+                        trailingContent = {
+                            Icon(
+                                if (showRare) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                contentDescription = stringResource(if (showRare) R.string.collapse else R.string.expand),
+                            )
+                        },
+                    )
+                    HorizontalDivider()
+                }
+                if (showRare) items(rare, key = { it.id }) { p -> SpeakerRow(p) { selected = p } }
             }
         }
     }
 
     selected?.let { p -> SpeakerDialog(p, list.orEmpty(), vm, onDismiss = { selected = null }) }
+}
+
+@Composable
+private fun SpeakerRow(p: SpeakerProfile, onClick: () -> Unit) {
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        leadingContent = { SpeakerDot(p, Modifier.size(20.dp)) },
+        headlineContent = {
+            Text(if (p.isMe) "${speakerName(p)} · ${stringResource(R.string.speaker_me)}" else speakerName(p))
+        },
+        supportingContent = {
+            Text(stringResource(R.string.speaker_details, Formatters.duration(p.totalSpeechMs), Formatters.dateTime(p.lastSeenEpochMs)))
+        },
+    )
+    HorizontalDivider()
 }
 
 @Composable

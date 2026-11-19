@@ -3,6 +3,7 @@ package de.open2ndbrain.work
 import androidx.work.ExistingWorkPolicy
 import androidx.work.WorkInfo.State
 import de.open2ndbrain.core.RecordingFile
+import de.open2ndbrain.core.SpeakerProfile
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.settings.SettingsKeys
 import de.open2ndbrain.settings.TranscriptionMode
@@ -161,6 +162,25 @@ class TranscriptionPlannerTest {
         assertEquals(-1, currentLineIndex(lines, a, 3000))
         assertEquals(-1, currentLineIndex(lines, File("/a/b.ogg"), 100))
         assertEquals(-1, currentLineIndex(lines, null, 100))
+    }
+
+    @Test
+    fun speakerListSplit() {
+        fun sp(id: String, speechMs: Long, last: Long, name: String? = null, me: Boolean = false) = SpeakerProfile(
+            id = id, name = name, number = 1, isMe = me, embedding = emptyList(), sampleCount = 1,
+            totalSpeechMs = speechMs, firstSeenEpochMs = 0, lastSeenEpochMs = last,
+        )
+        val (main, rare) = SpeakerDirectory.splitForDisplay(
+            listOf(
+                sp("frequent", 120_000, 50),
+                sp("rareOld", 5_000, 10),
+                sp("named", 1_000, 5, name = "Max"),
+                sp("me", 500, 1, me = true),
+                sp("rareNew", 59_999, 99),
+            ),
+        )
+        assertEquals(listOf("me", "named", "frequent"), main.map { it.id })
+        assertEquals(listOf("rareNew", "rareOld"), rare.map { it.id })
     }
 
     @Test

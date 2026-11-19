@@ -285,6 +285,10 @@
     <!-- Phase 2: Sprecher -->
     <string name="speakers_title">Sprecher</string>
     <string name="speakers_empty">Noch keine Sprecher erkannt. Sie erscheinen, sobald Aufnahmen mit Sprechererkennung transkribiert wurden.</string>
+    <string name="speakers_cleanup_hint">Unbenannte, selten gehörte Stimmen werden nach 90 Tagen ohne Wiedererkennung automatisch entfernt. Wer einen Namen bekommt, bleibt erhalten.</string>
+    <string name="speakers_rare">Selten gehört (%1$d)</string>
+    <string name="expand">Ausklappen</string>
+    <string name="collapse">Einklappen</string>
     <string name="speaker_number">Sprecher %1$d</string>
     <string name="speaker_unknown">Unbekannt</string>
     <string name="speaker_me">Ich</string>
