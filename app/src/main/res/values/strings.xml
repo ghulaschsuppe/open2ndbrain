@@ -29,7 +29,6 @@
     <string name="action_pause">Pause</string>
     <string name="action_pause_15">Pause 15 min</string>
     <string name="action_resume">Fortsetzen</string>
-    <string name="action_stop">Stopp</string>
 
     <!-- Benachrichtigungen -->
     <string name="channel_recording_name">Laufende Aufnahme</string>
@@ -115,7 +114,7 @@
     <string name="settings_version">Version %1$s</string>
     <string name="settings_license">Lizenz: GNU AGPL-3.0-or-later. Freie Software ohne Gewährleistung.</string>
     <string name="settings_source">Der vollständige Quelltext ist öffentlich auf GitHub verfügbar: github.com/ghulaschsuppe/open2ndbrain</string>
-    <string name="settings_privacy">Alle Aufnahmen bleiben ausschließlich auf diesem Gerät. Die App hat keinen Internetzugriff.</string>
+    <string name="settings_privacy">Alle Aufnahmen und Transkripte bleiben ausschließlich auf diesem Gerät. Internet wird nur für den einmaligen Download der Sprachmodelle genutzt.</string>
     <string name="legal_short">Nimm Gespräche nur mit dem Einverständnis aller Anwesenden auf (§ 201 StGB).</string>
 
     <!-- Akku -->
@@ -151,4 +150,159 @@
     <string name="onb_bt_text">Damit die App Headsets und Ohrhörer als Mikrofon nutzen und automatisch wechseln kann, braucht sie die Berechtigung „Geräte in der Nähe“.</string>
     <string name="onb_battery_title">Im Hintergrund weiterlaufen</string>
     <string name="onb_battery_text">Damit Android die Aufnahme nicht nach einiger Zeit beendet, nimm die App von der Akku-Optimierung aus.</string>
+
+    <!-- Phase 2: Downloads -->
+    <string name="channel_downloads_name">Modell-Downloads</string>
+    <string name="channel_transcription_name">Transkription</string>
+    <string name="action_cancel_work">Abbrechen</string>
+    <string name="download_notif_title">%1$s wird geladen</string>
+    <string name="download_progress">%1$s von %2$s</string>
+    <string name="download_no_space">Nicht genug freier Speicher (benötigt: %1$s).</string>
+    <string name="download_bad_checksum">Prüfsumme von %1$s stimmt nicht – Datei wurde verworfen.</string>
+    <string name="download_failed">Download fehlgeschlagen</string>
+
+    <!-- Phase 2: Transkription -->
+    <string name="transcription_model_broken">Sprachmodell nicht ladbar – bitte in den Einstellungen löschen und neu laden.</string>
+    <string name="transcription_oom">Zu wenig Arbeitsspeicher für die Transkription.</string>
+    <string name="transcription_notif_title">Transkription läuft</string>
+    <plurals name="transcription_notif_text">
+        <item quantity="one">%1$s · noch %2$d Datei</item>
+        <item quantity="other">%1$s · noch %2$d Dateien</item>
+    </plurals>
+    <string name="waiting_off">Transkription ist ausgeschaltet</string>
+    <string name="waiting_model_missing">Sprachmodell fehlt</string>
+    <string name="waiting_charger">Wartet auf Ladegerät</string>
+    <string name="waiting_battery_low">Akku schwach – wartet</string>
+
+    <!-- Phase 2: Meetings -->
+    <string name="action_meeting_start">Meeting starten</string>
+    <string name="action_meeting_end">Meeting beenden</string>
+    <string name="meeting_running">Meeting läuft</string>
+    <string name="meeting_untitled">Meeting</string>
+    <string name="meeting_long_title">Meeting noch aktiv?</string>
+    <string name="meeting_long_text">„%1$s“ läuft seit über 8 Stunden.</string>
+    <string name="meeting_tile_label">Meeting</string>
+    <string name="meeting_tile_off">Kein Meeting</string>
+    <string name="meeting_since">seit %1$s</string>
+
+    <!-- Phase 2: allgemein -->
+    <string name="back">Zurück</string>
+    <string name="more">Weitere Optionen</string>
+    <string name="save">Speichern</string>
+
+    <!-- Phase 2: Liste/Detail -->
+    <string name="badge_waiting">Transkript wartet</string>
+    <string name="badge_transcribing">wird transkribiert … %1$s</string>
+    <string name="badge_done">Transkript</string>
+    <string name="badge_failed">Transkription fehlgeschlagen</string>
+    <string name="recordings_audio_deleted">Audio gelöscht</string>
+    <string name="retranscribe">Neu transkribieren</string>
+    <string name="delete_audio">Audio löschen</string>
+    <string name="detail_audio_deleted">Das Audio wurde gelöscht – das Transkript bleibt erhalten.</string>
+    <string name="detail_no_transcript">Noch kein Transkript.</string>
+    <string name="detail_transcript_empty">In dieser Datei wurde keine Sprache erkannt.</string>
+    <string name="detail_transcript_failed">Die Transkription ist mehrfach fehlgeschlagen. „Neu transkribieren“ versucht es erneut.</string>
+    <string name="bookmark_action">Merken</string>
+    <string name="bookmark_saved">Gemerkt – die letzten 30 Sekunden sind markiert</string>
+    <string name="bookmark_note_label">Notiz zum Lesezeichen</string>
+    <string name="marker_delete_title">Markierung löschen?</string>
+    <string name="marker_delete_text">Nur die Markierung wird gelöscht, Aufnahmen und Transkripte bleiben.</string>
+
+    <!-- Phase 2: Meetings in der App -->
+    <string name="meeting_end_running">Meeting beenden · %1$s</string>
+    <string name="meeting_running_since">läuft seit %1$s</string>
+    <string name="meeting_title_edit">Titel bearbeiten</string>
+    <string name="meeting_title_label">Titel des Meetings</string>
+    <string name="meeting_no_lines">Für diesen Zeitraum gibt es noch keine Transkripte.</string>
+    <string name="meeting_no_lines_running">Das Meeting läuft noch. Das Transkript erscheint nach dem Beenden.</string>
+    <plurals name="meeting_pending">
+        <item quantity="one">%1$d Datei des Meetings wird noch transkribiert.</item>
+        <item quantity="other">%1$d Dateien des Meetings werden noch transkribiert.</item>
+    </plurals>
+    <string name="meeting_charging_hint">Meeting wird beim Laden transkribiert („Nur beim Laden“).</string>
+    <string name="meeting_transcribe_now">Jetzt transkribieren</string>
+
+    <!-- Phase 2: Transkription (Aufnahme-Tab, Einstellungen) -->
+    <string name="transcription_card_title">Transkription</string>
+    <string name="transcription_running">Läuft · %1$s</string>
+    <string name="transcription_idle">Alles transkribiert</string>
+    <string name="transcription_scheduled">Startet in Kürze</string>
+    <plurals name="transcription_queue">
+        <item quantity="one">%1$d Datei in der Warteschlange</item>
+        <item quantity="other">%1$d Dateien in der Warteschlange</item>
+    </plurals>
+    <string name="transcription_rtf">Rechenzeit %1$s Echtzeit</string>
+    <string name="settings_section_transcription">Transkription</string>
+    <string name="settings_transcription_mode">Wann transkribieren?</string>
+    <string name="transcription_mode_auto">Automatisch</string>
+    <string name="transcription_mode_auto_desc">Sobald eine Aufnahmedatei fertig ist (nicht bei schwachem Akku)</string>
+    <string name="transcription_mode_charging">Nur beim Laden</string>
+    <string name="transcription_mode_charging_desc">Schont den Akku, Transkripte kommen später</string>
+    <string name="transcription_mode_off">Aus</string>
+    <string name="transcription_mode_off_desc">Keine Transkription</string>
+    <string name="settings_speaker_recognition">Sprechererkennung</string>
+    <string name="settings_speaker_recognition_desc">Erkennt, wer spricht – auch über Aufnahmen hinweg</string>
+    <string name="settings_speaker_recognition_no_model">Dafür bitte zuerst das Modell „WeSpeaker“ laden</string>
+    <string name="settings_threads">Rechenkerne</string>
+    <plurals name="settings_threads_value">
+        <item quantity="one">%1$d Kern</item>
+        <item quantity="other">%1$d Kerne</item>
+    </plurals>
+    <string name="settings_threads_fast">Schneller (Standard)</string>
+    <string name="settings_threads_saver">Schont Akku und Gerät</string>
+
+    <!-- Phase 2: Modelle -->
+    <string name="settings_section_models">Sprachmodelle</string>
+    <string name="models_volume_hint">Die Modelle werden einmalig geladen (zusammen ca. %1$s). Bitte WLAN nutzen. Danach arbeitet die App vollständig offline.</string>
+    <string name="models_meta_required">%1$s · %2$s · erforderlich</string>
+    <string name="models_meta_optional">%1$s · %2$s · optional</string>
+    <string name="models_license">Lizenz: %1$s</string>
+    <string name="models_installed">Installiert</string>
+    <string name="models_download">Laden</string>
+    <string name="models_resume">Fortsetzen</string>
+    <string name="models_retry">Erneut versuchen</string>
+    <string name="models_verifying">Prüfsumme wird geprüft …</string>
+    <string name="models_waiting_network">Wartet auf Netzwerk · %1$s von %2$s</string>
+    <string name="models_download_title">Modell laden?</string>
+    <string name="models_download_text">Es werden ca. %1$s geladen. Über mobile Daten kann das dein Datenvolumen stark belasten.</string>
+    <string name="models_download_wifi">Nur über WLAN laden</string>
+    <string name="models_download_mobile">Auch über mobile Daten</string>
+    <string name="models_delete_title">Modell löschen?</string>
+    <string name="models_delete_text">%1$s wird vom Gerät entfernt. Vorhandene Transkripte bleiben erhalten.</string>
+    <string name="models_import_title">Aus Dateien importieren</string>
+    <string name="models_import_hint">Ohne Internet am Gerät: Modelldateien am PC laden, aufs Handy kopieren und hier auswählen (mehrere auf einmal möglich). Die Zuordnung erfolgt über Dateiname und SHA-256.</string>
+    <string name="models_import_button">Dateien auswählen</string>
+    <string name="models_import_running">Importiere %1$s (%2$d/%3$d) …</string>
+    <string name="models_import_ok">%1$s → %2$s importiert</string>
+    <string name="models_import_present">%1$s ist bereits vorhanden</string>
+    <string name="models_import_bad">%1$s: Prüfsumme passt nicht (falsche Version oder beschädigt)</string>
+    <string name="models_import_unknown">%1$s gehört zu keinem bekannten Modell</string>
+    <string name="models_import_error">%1$s konnte nicht gelesen werden</string>
+    <string name="onb_models_title">Sprachmodelle laden (optional)</string>
+    <string name="onb_models_text">Für die Transkription braucht die App Sprachmodelle (ca. %1$s). Sie werden einmalig im Hintergrund geladen – das kannst du auch später in den Einstellungen tun.</string>
+    <string name="onb_models_started">Download gestartet – läuft im Hintergrund weiter.</string>
+
+    <!-- Phase 2: Sprecher -->
+    <string name="speakers_title">Sprecher</string>
+    <string name="speakers_empty">Noch keine Sprecher erkannt. Sie erscheinen, sobald Aufnahmen mit Sprechererkennung transkribiert wurden.</string>
+    <string name="speaker_number">Sprecher %1$d</string>
+    <string name="speaker_unknown">Unbekannt</string>
+    <string name="speaker_me">Ich</string>
+    <string name="speaker_details">Sprechzeit %1$s · zuletzt %2$s</string>
+    <string name="speaker_rename">Umbenennen</string>
+    <string name="speaker_set_me">Das bin ich</string>
+    <string name="speaker_merge">Zusammenführen mit …</string>
+    <string name="speaker_merge_hint">%1$s ist dieselbe Person wie:</string>
+    <string name="speaker_name_label">Name</string>
+    <string name="speaker_delete_text">Der Sprecher wird vergessen. In Transkripten erscheint er danach als „Unbekannt“.</string>
+
+    <!-- Phase 2: Lizenzen -->
+    <string name="licenses_title">Lizenzen und Namensnennung</string>
+    <string name="licenses_app">GNU AGPL-3.0-or-later. Quelltext: github.com/ghulaschsuppe/open2ndbrain</string>
+    <string name="licenses_libraries_title">Bibliotheken</string>
+    <string name="licenses_libraries">AndroidX/Jetpack, Kotlin, kotlinx: Apache-2.0 · sherpa-onnx (k2-fsa): Apache-2.0 · ONNX Runtime: MIT</string>
+    <string name="licenses_models_title">Sprachmodelle</string>
+    <string name="licenses_model_entry">Lizenz: %1$s
+Namensnennung: %2$s</string>
+    <string name="licenses_models_hint">Die Modelle sind nicht Teil der App; sie werden vom Nutzer geladen oder importiert.</string>
 </resources>

@@ -1,11 +1,13 @@
 package de.open2ndbrain.ui.settings
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.open2ndbrain.O2bApp
 import de.open2ndbrain.core.MicPreference
 import de.open2ndbrain.settings.AppSettings
+import de.open2ndbrain.settings.TranscriptionMode
 import de.open2ndbrain.ui.SystemSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,6 +43,32 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             launch(Dispatchers.IO) { container.recordings.deleteOlderThan(days) }
         }
     }
+
+    // ---------------------------------------------------------------- Transkription & Modelle
+
+    private val models = container.modelManager
+    val modelStates = models.states
+    val presentBytes = models.presentBytes
+    val waitingForNetwork = models.waitingForNetwork
+    val importState = models.importState
+
+    fun setTranscriptionMode(mode: TranscriptionMode) = launch {
+        container.settings.setTranscriptionMode(mode)
+    }
+
+    fun setSpeakerRecognition(value: Boolean) = launch {
+        container.settings.setSpeakerRecognition(value)
+        container.transcriptionScheduler.schedule()
+    }
+
+    fun setThreads(n: Int) = launch { container.settings.setTranscriptionThreads(n) }
+
+    fun download(id: String, unmeteredOnly: Boolean) = models.download(id, unmeteredOnly)
+    fun downloadAll(unmeteredOnly: Boolean) = models.downloadAll(unmeteredOnly)
+    fun cancel(id: String) = models.cancel(id)
+    fun deleteModel(id: String) = launch { models.delete(id) }
+    fun import(uris: List<Uri>) = models.import(uris)
+    fun clearImport() = models.clearImportState()
 
     private fun launch(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) {
         viewModelScope.launch(block = block)

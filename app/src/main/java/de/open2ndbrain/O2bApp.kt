@@ -10,5 +10,7 @@ class O2bApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Transkription planen (App-Start, abgeschlossene Dateien, stündliches Sicherheitsnetz).
+        container.transcriptionScheduler.start()
     }
 }

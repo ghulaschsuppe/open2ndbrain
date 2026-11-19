@@ -9,6 +9,8 @@ import java.util.Locale
 object Formatters {
     private val GERMAN = Locale.GERMANY
     private val TIME = DateTimeFormatter.ofPattern("HH:mm", GERMAN)
+    private val DATE_TIME = DateTimeFormatter.ofPattern("dd.MM.yyyy, HH:mm", GERMAN)
+    private val TIME_SECONDS = DateTimeFormatter.ofPattern("HH:mm:ss", GERMAN)
 
     /** „3 h 12 min“, „3 h“, „12 min“, „45 s“. */
     fun duration(ms: Long): String {
@@ -54,6 +56,30 @@ object Formatters {
     /** Uhrzeit „14:35“ in der gegebenen Zeitzone. */
     fun time(epochMs: Long, zone: ZoneId = ZoneId.systemDefault()): String =
         TIME.format(Instant.ofEpochMilli(epochMs).atZone(zone))
+
+    /** Uhrzeit mit Sekunden „14:03:12“ (Transkript-Äußerungen). */
+    fun timeWithSeconds(epochMs: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+        TIME_SECONDS.format(Instant.ofEpochMilli(epochMs).atZone(zone))
+
+    /** „18.11.2026, 14:03“ */
+    fun dateTime(epochMs: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+        DATE_TIME.format(Instant.ofEpochMilli(epochMs).atZone(zone))
+
+    /** Zeitraum „14:00–15:30“. */
+    fun timeRange(startMs: Long, endMs: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+        "${time(startMs, zone)}–${time(endMs, zone)}"
+
+    /** Laufende Dauer als Stoppuhr „00:23:10“. */
+    fun stopwatch(ms: Long): String {
+        val t = ms.coerceAtLeast(0) / 1000
+        return String.format(GERMAN, "%02d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60)
+    }
+
+    /** Echtzeitfaktor „0,15×“. */
+    fun realTimeFactor(rtf: Float): String = String.format(GERMAN, "%.2f×", rtf)
+
+    /** Prozent „42 %“. */
+    fun percent(fraction: Float): String = "${(fraction.coerceIn(0f, 1f) * 100).toInt()} %"
 
     /** Stundenbereich einer Aufnahmedatei: „14:00–15:00“. */
     fun hourRange(hourStartEpochMs: Long, zone: ZoneId = ZoneId.systemDefault()): String {

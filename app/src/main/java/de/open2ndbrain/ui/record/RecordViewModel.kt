@@ -6,7 +6,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.open2ndbrain.O2bApp
 import de.open2ndbrain.core.EngineState
+import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MicPreference
+import de.open2ndbrain.core.TranscriptionStatus
+import de.open2ndbrain.service.MeetingController
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderService
 import de.open2ndbrain.service.displayStatus
@@ -114,6 +117,21 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     fun setMicPreference(pref: MicPreference) {
         viewModelScope.launch { container.settings.setMicPreference(pref) }
     }
+
+    // ---------------------------------------------------------------- Meetings, Lesezeichen, Transkription
+
+    val meeting: StateFlow<Marker?> = container.markers.activeMeeting
+    val transcription: StateFlow<TranscriptionStatus> = container.transcriptionStatus.status
+
+    fun startMeeting() = viewModelScope.launch { MeetingController.start(getApplication()) }
+    fun endMeeting() = viewModelScope.launch { MeetingController.end(getApplication()) }
+
+    fun setMeetingTitle(title: String) = viewModelScope.launch {
+        val m = container.markers.activeMeeting.value ?: return@launch
+        container.markers.update(m.copy(title = title.trim().ifEmpty { null }))
+    }
+
+    fun bookmark() = viewModelScope.launch { container.markers.addBookmark() }
 
     private fun send(action: String) {
         RecorderService.send(getApplication(), action)

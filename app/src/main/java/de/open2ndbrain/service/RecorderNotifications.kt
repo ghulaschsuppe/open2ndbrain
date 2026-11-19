@@ -31,8 +31,10 @@ object RecorderNotifications {
     private const val RC_PAUSE = 11
     private const val RC_PAUSE_15 = 12
     private const val RC_RESUME = 13
-    private const val RC_STOP = 14
     private const val RC_START = 15
+    private const val RC_MEETING = 16
+    private const val RC_LONG_MEETING = 17
+    const val ID_LONG_MEETING = 4
 
     fun ensureChannels(context: Context) {
         val nm = NotificationManagerCompat.from(context)
@@ -72,23 +74,38 @@ object RecorderNotifications {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openAppIntent(context))
 
-        when (model.status) {
-            DisplayStatus.Recording, DisplayStatus.MicBusy, DisplayStatus.Starting, DisplayStatus.Error -> {
-                builder.addAction(0, context.getString(R.string.action_pause_15), serviceIntent(context, RecorderService.ACTION_PAUSE_15, RC_PAUSE_15))
-                builder.addAction(0, context.getString(R.string.action_pause), serviceIntent(context, RecorderService.ACTION_PAUSE, RC_PAUSE))
-                builder.addAction(0, context.getString(R.string.action_stop), serviceIntent(context, RecorderService.ACTION_STOP, RC_STOP))
+        // Android zeigt höchstens 3 Aktionen: [Meeting] [Pause 15 min] [Pause | Fortsetzen].
+        // „Stopp“ gibt es nur noch in der App – die unbefristete Pause deckt den Datenschutz ab.
+        if (model.status != DisplayStatus.Off && model.status != DisplayStatus.Stopping) {
+            if (model.meetingActive) {
+                builder.addAction(0, context.getString(R.string.action_meeting_end), serviceIntent(context, RecorderService.ACTION_MEETING_END, RC_MEETING))
+            } else {
+                builder.addAction(0, context.getString(R.string.action_meeting_start), serviceIntent(context, RecorderService.ACTION_MEETING_START, RC_MEETING))
             }
-            DisplayStatus.Paused -> {
+            builder.addAction(0, context.getString(R.string.action_pause_15), serviceIntent(context, RecorderService.ACTION_PAUSE_15, RC_PAUSE_15))
+            if (model.status == DisplayStatus.Paused) {
                 builder.addAction(0, context.getString(R.string.action_resume), serviceIntent(context, RecorderService.ACTION_RESUME, RC_RESUME))
-                builder.addAction(0, context.getString(R.string.action_stop), serviceIntent(context, RecorderService.ACTION_STOP, RC_STOP))
+            } else {
+                builder.addAction(0, context.getString(R.string.action_pause), serviceIntent(context, RecorderService.ACTION_PAUSE, RC_PAUSE))
             }
-            DisplayStatus.Off, DisplayStatus.Stopping -> Unit
         }
         return builder.build()
     }
 
     /** Titel und Text, z. B. „Nimmt auf · 3 h 12 min · Pixel Buds“. */
     fun texts(context: Context, model: NotificationModel): Pair<String, String> {
+        val base = baseTexts(context, model)
+        if (!model.meetingActive) return base
+        // Während eines Meetings steht das Meeting oben, der Aufnahmestatus darunter.
+        val meeting = listOfNotNull(
+            context.getString(R.string.meeting_running),
+            Formatters.elapsedMinutes(model.meetingMinutes ?: 0),
+            model.meetingTitle,
+        ).joinToString(" · ")
+        return meeting to base.first
+    }
+
+    private fun baseTexts(context: Context, model: NotificationModel): Pair<String, String> {
         val today = context.getString(R.string.notif_stored_today, Formatters.elapsedMinutes(model.storedMinutesToday))
         return when (model.status) {
             DisplayStatus.Recording -> {
@@ -176,6 +193,26 @@ object RecorderNotifications {
     }
 
     fun cancelStorageFull(context: Context) = NotificationManagerCompat.from(context).cancel(ID_STORAGE_FULL)
+
+    /** „Meeting noch aktiv?“ nach 8 h (das Meeting wird nicht automatisch beendet). */
+    @SuppressLint("MissingPermission") // durch canPost() geprüft
+    fun showLongMeeting(context: Context, title: String?) {
+        ensureChannels(context)
+        if (!canPost(context)) return
+        val text = context.getString(R.string.meeting_long_text, title ?: context.getString(R.string.meeting_untitled))
+        val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_stat_meeting)
+            .setContentTitle(context.getString(R.string.meeting_long_title))
+            .setContentText(text)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(true)
+            .setContentIntent(openAppIntent(context))
+            .addAction(0, context.getString(R.string.action_meeting_end), serviceIntent(context, RecorderService.ACTION_MEETING_END, RC_LONG_MEETING))
+            .build()
+        NotificationManagerCompat.from(context).notify(ID_LONG_MEETING, notification)
+    }
+
+    fun cancelLongMeeting(context: Context) = NotificationManagerCompat.from(context).cancel(ID_LONG_MEETING)
 
     private fun canPost(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||

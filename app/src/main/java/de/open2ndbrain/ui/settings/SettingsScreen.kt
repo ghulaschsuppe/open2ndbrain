@@ -1,5 +1,6 @@
 package de.open2ndbrain.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +45,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import de.open2ndbrain.BuildConfig
 import de.open2ndbrain.R
 import de.open2ndbrain.core.MicPreference
+import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.ModelState
+import de.open2ndbrain.settings.TranscriptionMode
+import de.open2ndbrain.ui.speakers.SpeakersScreen
 import de.open2ndbrain.settings.AppSettings
 import de.open2ndbrain.ui.SystemSettings
 import de.open2ndbrain.ui.VendorTip
@@ -50,7 +56,21 @@ import de.open2ndbrain.ui.record.preferenceLabel
 
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier, vm: SettingsViewModel = viewModel()) {
+    var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
+    BackHandler(enabled = page != SettingsPage.Main) { page = SettingsPage.Main }
+    when (page) {
+        SettingsPage.Speakers -> SpeakersScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
+        SettingsPage.Licenses -> LicensesScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
+        SettingsPage.Main -> SettingsMain(modifier, vm, onOpen = { page = it })
+    }
+}
+
+private enum class SettingsPage { Main, Speakers, Licenses }
+
+@Composable
+private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (SettingsPage) -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val modelStates by vm.modelStates.collectAsStateWithLifecycle()
     val batteryIgnored by vm.batteryIgnored.collectAsStateWithLifecycle()
     var pendingRetention by remember { mutableStateOf<Int?>(null) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refreshBattery() }
@@ -102,6 +122,56 @@ fun SettingsScreen(modifier: Modifier = Modifier, vm: SettingsViewModel = viewMo
             Hint(stringResource(R.string.settings_mic_specific_hint))
         }
 
+        Section(stringResource(R.string.settings_section_transcription)) {
+            Label(stringResource(R.string.settings_transcription_mode))
+            TranscriptionMode.entries.forEach { mode ->
+                RadioRow(
+                    selected = s.transcriptionMode == mode,
+                    title = stringResource(
+                        when (mode) {
+                            TranscriptionMode.Automatic -> R.string.transcription_mode_auto
+                            TranscriptionMode.ChargingOnly -> R.string.transcription_mode_charging
+                            TranscriptionMode.Off -> R.string.transcription_mode_off
+                        },
+                    ),
+                    subtitle = stringResource(
+                        when (mode) {
+                            TranscriptionMode.Automatic -> R.string.transcription_mode_auto_desc
+                            TranscriptionMode.ChargingOnly -> R.string.transcription_mode_charging_desc
+                            TranscriptionMode.Off -> R.string.transcription_mode_off_desc
+                        },
+                    ),
+                    onClick = { vm.setTranscriptionMode(mode) },
+                )
+            }
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            val speakerModel = modelStates[ModelCatalog.WESPEAKER_RESNET34.id] is ModelState.Installed
+            SwitchRow(
+                checked = s.speakerRecognition && speakerModel,
+                title = stringResource(R.string.settings_speaker_recognition),
+                subtitle = stringResource(
+                    if (speakerModel) R.string.settings_speaker_recognition_desc else R.string.settings_speaker_recognition_no_model,
+                ),
+                onChange = { if (speakerModel) vm.setSpeakerRecognition(it) },
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Label(stringResource(R.string.settings_threads))
+            AppSettings.THREAD_OPTIONS.forEach { n ->
+                RadioRow(
+                    selected = s.transcriptionThreads == n,
+                    title = pluralStringResource(R.plurals.settings_threads_value, n, n),
+                    subtitle = stringResource(if (n == AppSettings.DEFAULT_THREADS) R.string.settings_threads_fast else R.string.settings_threads_saver),
+                    onClick = { vm.setThreads(n) },
+                )
+            }
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            OutlinedButton(onClick = { onOpen(SettingsPage.Speakers) }) { Text(stringResource(R.string.speakers_title)) }
+        }
+
+        Section(stringResource(R.string.settings_section_models)) {
+            ModelsBlock(vm)
+        }
+
         Section(stringResource(R.string.settings_section_storage)) {
             Label(stringResource(R.string.settings_retention))
             AppSettings.RETENTION_OPTIONS.forEach { days ->
@@ -128,6 +198,7 @@ fun SettingsScreen(modifier: Modifier = Modifier, vm: SettingsViewModel = viewMo
             Hint(stringResource(R.string.settings_source))
             Hint(stringResource(R.string.settings_privacy))
             Hint(stringResource(R.string.legal_short))
+            OutlinedButton(onClick = { onOpen(SettingsPage.Licenses) }) { Text(stringResource(R.string.licenses_title)) }
         }
     }
 

@@ -23,6 +23,7 @@ import de.open2ndbrain.core.EngineConfig
 import de.open2ndbrain.core.EngineState
 import de.open2ndbrain.core.EngineStatus
 import de.open2ndbrain.core.RecordingEngine
+import de.open2ndbrain.markers.MarkerLogic
 import de.open2ndbrain.settings.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -99,6 +100,7 @@ class RecorderService : LifecycleService() {
         observeNotification()
         observeTile()
         observePersistentError()
+        observeLongMeeting()
         runRetentionLoop()
     }
 
@@ -170,6 +172,15 @@ class RecorderService : LifecycleService() {
             ACTION_PAUSE_15 -> pause(System.currentTimeMillis() + PAUSE_SHORT_MS, startId)
             ACTION_STOP -> stopRecording(startId)
             ACTION_RESTORE -> restore(startId)
+            ACTION_MEETING_START -> {
+                MeetingController.start(this)
+                // Meeting während einer Pause: Aufnahme fortsetzen (Dienst ist bereits im Vordergrund).
+                if (statusHolder.status.value.pausedUntil != null && inForeground) {
+                    settings.setPausedUntil(0)
+                    startOrResume(startId)
+                }
+            }
+            ACTION_MEETING_END -> MeetingController.end(this)
             else -> Log.w(TAG, "Unbekannte Aktion $action")
         }
     }
@@ -397,7 +408,9 @@ class RecorderService : LifecycleService() {
             }
         }
         lifecycleScope.launch {
-            combine(engineEssentials, statusHolder.status, ticker) { e, s, now -> NotificationModel.from(e, s, now) }
+            combine(engineEssentials, statusHolder.status, container.markers.activeMeeting, ticker) { e, s, meeting, now ->
+                NotificationModel.from(e, s, now, meeting)
+            }
                 .distinctUntilChanged()
                 .conflate()
                 .collect { model ->
@@ -445,6 +458,21 @@ class RecorderService : LifecycleService() {
                         if (inForeground && !paused) RecorderNotifications.showResumePrompt(this@RecorderService)
                     }
                 }
+        }
+    }
+
+    /** Läuft ein Meeting länger als 8 h, einmal nachfragen (nicht automatisch beenden). */
+    private fun observeLongMeeting() {
+        lifecycleScope.launch {
+            var notifiedFor: String? = null
+            while (isActive) {
+                val meeting = container.markers.activeMeeting.value
+                if (MarkerLogic.isLongRunning(meeting, System.currentTimeMillis()) && meeting != null && notifiedFor != meeting.id) {
+                    notifiedFor = meeting.id
+                    RecorderNotifications.showLongMeeting(this@RecorderService, meeting.title)
+                }
+                delay(LONG_MEETING_CHECK_MS)
+            }
         }
     }
 
@@ -512,6 +540,8 @@ class RecorderService : LifecycleService() {
         const val ACTION_PAUSE_15 = "de.open2ndbrain.action.PAUSE_15"
         const val ACTION_RESUME = "de.open2ndbrain.action.RESUME"
         const val ACTION_STOP = "de.open2ndbrain.action.STOP"
+        const val ACTION_MEETING_START = "de.open2ndbrain.action.MEETING_START"
+        const val ACTION_MEETING_END = "de.open2ndbrain.action.MEETING_END"
         internal const val ACTION_AUTO_RESUME = "de.open2ndbrain.action.AUTO_RESUME"
         internal const val ACTION_RESTORE = "de.open2ndbrain.action.RESTORE"
 
@@ -521,6 +551,7 @@ class RecorderService : LifecycleService() {
         const val PAUSE_SHORT_MS = 15 * 60_000L
         private const val STOP_TIMEOUT_MS = 5_000L
         private const val ERROR_PROMPT_DELAY_MS = 10_000L
+        private const val LONG_MEETING_CHECK_MS = 60_000L
         private const val PAUSE_WAKE_MARGIN_MS = 60_000L
         private const val TICK_MS = 15_000L
         private const val NOTIFY_MIN_INTERVAL_MS = 1_000L

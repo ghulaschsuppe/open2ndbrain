@@ -1,5 +1,6 @@
 package de.open2ndbrain.ui.recordings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,15 +10,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.Subject
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -45,24 +50,43 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.open2ndbrain.R
+import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.RecordingFile
 import de.open2ndbrain.ui.Formatters
 import java.time.LocalDate
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RecordingsScreen(modifier: Modifier = Modifier, vm: RecordingsViewModel = viewModel()) {
-    val days by vm.days.collectAsStateWithLifecycle()
+    val selected by vm.selected.collectAsStateWithLifecycle()
+    val meeting by vm.selectedMeeting.collectAsStateWithLifecycle()
+    when {
+        meeting != null -> {
+            BackHandler { vm.closeMeeting() }
+            MeetingDetail(meeting!!, vm, modifier)
+        }
+        selected != null -> {
+            BackHandler { vm.closeDetail() }
+            RecordingDetail(selected!!, vm, modifier)
+        }
+        else -> RecordingsList(vm, modifier)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun RecordingsList(vm: RecordingsViewModel, modifier: Modifier) {
+    val data by vm.data.collectAsStateWithLifecycle()
     val player by vm.player.state.collectAsStateWithLifecycle()
+    val status by vm.transcriptionStatus.collectAsStateWithLifecycle()
     var toDelete by remember { mutableStateOf<RecordingFile?>(null) }
     val today = LocalDate.now()
 
     Column(modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
-            val list = days
+            val d = data
             when {
-                list == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                list.isEmpty() -> Text(
+                d == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                d.days.isEmpty() -> Text(
                     stringResource(R.string.recordings_empty),
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -71,14 +95,23 @@ fun RecordingsScreen(modifier: Modifier = Modifier, vm: RecordingsViewModel = vi
                         .padding(32.dp),
                 )
                 else -> LazyColumn(Modifier.fillMaxSize()) {
-                    list.forEach { day ->
+                    d.days.forEach { day ->
                         stickyHeader(key = "day-${day.date}") { DayHeader(day, today) }
+                        items(d.meetings[day.date].orEmpty(), key = { "m-${it.id}" }) { m ->
+                            MeetingRow(m, onClick = { vm.openMeeting(m) })
+                            HorizontalDivider()
+                        }
                         items(day.recordings, key = { it.audio.path }) { rec ->
                             RecordingRow(
                                 recording = rec,
+                                badge = d.badges[rec.audio.path] ?: TranscriptBadge.None,
+                                progress = if (status.currentFile == rec.audio.name) status.progress else null,
+                                audioDeleted = rec.audio.path in d.audioDeleted,
+                                bookmarks = d.bookmarks[rec.audio.path] ?: 0,
                                 selected = player.file == rec.audio,
                                 playing = player.file == rec.audio && player.playing,
-                                onClick = { vm.play(rec) },
+                                onClick = { vm.open(rec) },
+                                onPlay = { vm.play(rec.audio) },
                                 onDelete = { toDelete = rec },
                             )
                             HorizontalDivider()
@@ -88,37 +121,24 @@ fun RecordingsScreen(modifier: Modifier = Modifier, vm: RecordingsViewModel = vi
             }
         }
         if (player.file != null) {
-            PlayerBar(
-                state = player,
-                onToggle = vm.player::toggle,
-                onSeek = vm.player::seekTo,
-                onClose = vm.player::close,
-            )
+            PlayerBar(player, onToggle = vm.player::toggle, onSeek = vm.player::seekTo, onClose = vm.player::close)
         }
     }
 
-    toDelete?.let { rec ->
-        AlertDialog(
-            onDismissRequest = { toDelete = null },
-            title = { Text(stringResource(R.string.recordings_delete_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.recordings_delete_text,
-                        Formatters.hourRange(rec.hourStartEpochMs),
-                        Formatters.duration(rec.durationMs),
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.delete(rec)
-                    toDelete = null
-                }) { Text(stringResource(R.string.delete)) }
-            },
-            dismissButton = { TextButton(onClick = { toDelete = null }) { Text(stringResource(R.string.cancel)) } },
-        )
-    }
+    toDelete?.let { rec -> DeleteRecordingDialog(rec, onConfirm = { vm.delete(rec); toDelete = null }, onDismiss = { toDelete = null }) }
+}
+
+@Composable
+fun DeleteRecordingDialog(rec: RecordingFile, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.recordings_delete_title)) },
+        text = {
+            Text(stringResource(R.string.recordings_delete_text, Formatters.hourRange(rec.hourStartEpochMs), Formatters.duration(rec.durationMs)))
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.delete)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable
@@ -141,11 +161,36 @@ private fun DayHeader(day: DayGroup, today: LocalDate) {
 }
 
 @Composable
+private fun MeetingRow(m: Marker, onClick: () -> Unit) {
+    val end = m.endEpochMs
+    ListItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        leadingContent = { Icon(Icons.Filled.Groups, contentDescription = null) },
+        headlineContent = { Text(m.title ?: stringResource(R.string.meeting_untitled)) },
+        supportingContent = {
+            Text(
+                if (end == null) {
+                    stringResource(R.string.meeting_running_since, Formatters.time(m.startEpochMs))
+                } else {
+                    "${Formatters.timeRange(m.startEpochMs, end)} · ${Formatters.duration(end - m.startEpochMs)}"
+                },
+            )
+        },
+    )
+}
+
+@Composable
 private fun RecordingRow(
     recording: RecordingFile,
+    badge: TranscriptBadge,
+    progress: Float?,
+    audioDeleted: Boolean,
+    bookmarks: Int,
     selected: Boolean,
     playing: Boolean,
     onClick: () -> Unit,
+    onPlay: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val part = RecordingGrouping.partNumber(recording.audio.name)
@@ -155,48 +200,67 @@ private fun RecordingRow(
     }
     val details = buildList {
         add(Formatters.duration(recording.durationMs))
-        add(Formatters.bytes(recording.sizeBytes))
+        if (audioDeleted) add(stringResource(R.string.recordings_audio_deleted)) else add(Formatters.bytes(recording.sizeBytes))
         addAll(RecordingGrouping.inputNames(recording))
+        badgeText(badge, progress)?.let(::add)
     }.joinToString(" · ")
 
     ListItem(
         modifier = Modifier.clickable(enabled = !recording.inProgress, onClick = onClick),
-        colors = if (selected) {
-            ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-        } else {
-            ListItemDefaults.colors()
-        },
+        colors = if (selected) ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.secondaryContainer) else ListItemDefaults.colors(),
         leadingContent = {
-            Icon(
-                when {
-                    recording.inProgress -> Icons.Filled.FiberManualRecord
-                    playing -> Icons.Filled.GraphicEq
-                    else -> Icons.Filled.PlayArrow
-                },
-                contentDescription = null,
-                tint = if (recording.inProgress) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-            )
+            when {
+                recording.inProgress -> Icon(Icons.Filled.FiberManualRecord, null, tint = MaterialTheme.colorScheme.error)
+                audioDeleted -> Icon(Icons.AutoMirrored.Filled.Subject, null, tint = MaterialTheme.colorScheme.primary)
+                else -> IconButton(onClick = onPlay) {
+                    Icon(
+                        if (playing) Icons.Filled.GraphicEq else Icons.Filled.PlayArrow,
+                        contentDescription = stringResource(R.string.player_play),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         },
-        headlineContent = { Text(title) },
+        headlineContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title)
+                if (bookmarks > 0) {
+                    Icon(
+                        Icons.Filled.Flag,
+                        contentDescription = stringResource(R.string.bookmark_action),
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier
+                            .padding(start = 6.dp)
+                            .size(16.dp),
+                    )
+                }
+            }
+        },
         supportingContent = { Text(details) },
         trailingContent = {
-            if (recording.inProgress) {
-                Text(
+            when {
+                recording.inProgress -> Text(
                     stringResource(R.string.recordings_running),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.labelLarge,
                 )
-            } else {
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
-                }
+                !audioDeleted -> IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, stringResource(R.string.delete)) }
             }
         },
     )
 }
 
 @Composable
-private fun PlayerBar(state: PlayerState, onToggle: () -> Unit, onSeek: (Long) -> Unit, onClose: () -> Unit) {
+private fun badgeText(badge: TranscriptBadge, progress: Float?): String? = when (badge) {
+    TranscriptBadge.None -> null
+    TranscriptBadge.Waiting -> stringResource(R.string.badge_waiting)
+    TranscriptBadge.Transcribing -> stringResource(R.string.badge_transcribing, Formatters.percent(progress ?: 0f))
+    TranscriptBadge.Done -> stringResource(R.string.badge_done)
+    TranscriptBadge.Failed -> stringResource(R.string.badge_failed)
+}
+
+@Composable
+fun PlayerBar(state: PlayerState, onToggle: () -> Unit, onSeek: (Long) -> Unit, onClose: (() -> Unit)?) {
     // Während des Ziehens die Position lokal halten, erst beim Loslassen springen.
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
@@ -212,14 +276,9 @@ private fun PlayerBar(state: PlayerState, onToggle: () -> Unit, onSeek: (Long) -
                         contentDescription = stringResource(if (state.playing) R.string.player_pause else R.string.player_play),
                     )
                 }
-                Text(
-                    state.file?.name.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close))
+                Text(state.file?.name.orEmpty(), style = MaterialTheme.typography.bodyMedium, maxLines = 1, modifier = Modifier.weight(1f))
+                if (onClose != null) {
+                    IconButton(onClick = onClose) { Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close)) }
                 }
             }
             if (state.error) {
