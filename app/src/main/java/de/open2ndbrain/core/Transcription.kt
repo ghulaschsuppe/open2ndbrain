@@ -125,3 +125,9 @@ data class TranscriptionStatus(
 interface TranscriptionStatusHolder {
     val status: StateFlow<TranscriptionStatus>
 }
+
+/**
+ * Modelle sind nicht ladbar (Datei fehlt/defekt, falsche ABI). Nur dieser Fehler bedeutet „Modell neu laden“;
+ * Decoder-/Dateifehler sind [java.io.IOException], Speichermangel bleibt [OutOfMemoryError].
+ */
+class ModelLoadException(message: String, cause: Throwable? = null) : Exception(message, cause)
