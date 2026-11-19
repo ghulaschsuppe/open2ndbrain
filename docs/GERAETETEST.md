@@ -1,7 +1,7 @@
 # Gerätetest Phase 1 – Checkliste
 
 Alles hier ist per Unit-Tests nur als Logik geprüft. Diese Punkte brauchen ein echtes Gerät
-(idealerweise Android 10, 13, 14 und 15/16). Logs: `adb logcat -s O2B-Audio O2B-Service`.
+(idealerweise Android 10, 13, 14 und 15/16). Logs: `adb logcat -s O2B-Audio RecorderService RecorderTile BootReceiver RecordingPlayer`.
 
 ## Installation
 - [ ] APK aus GitHub Actions (Artefakt) bzw. GitHub-Release installieren; Debug-Variante heißt `de.open2ndbrain.debug` und kann parallel installiert sein.
