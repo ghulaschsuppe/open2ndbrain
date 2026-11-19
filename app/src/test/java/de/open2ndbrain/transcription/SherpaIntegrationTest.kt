@@ -1,5 +1,6 @@
 package de.open2ndbrain.transcription
 
+import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.RecordingSidecar
 import de.open2ndbrain.speakers.FileSpeakerRepository
 import kotlinx.coroutines.flow.first
@@ -49,7 +50,17 @@ class SherpaIntegrationTest {
         val start = System.currentTimeMillis() - 3_600_000L // realistisch: Profile gelten als „kürzlich gehört“
         var idToTruth: Map<String?, String> = emptyMap()
 
-        SherpaRecognizer(File(models, "parakeet"), 4).use { rec ->
+        // ASR-Modell wählbar: O2B_ASR_MODEL = ID aus ModelCatalog.asrModels (Standard Parakeet)
+        val asr = System.getenv("O2B_ASR_MODEL")?.let { id -> ModelCatalog.asrModels.first { it.id == id } } ?: ModelCatalog.PARAKEET_V3
+        val asrDir = File(models, mapOf(
+            ModelCatalog.PARAKEET_V3.id to "parakeet",
+            ModelCatalog.DE_FASTCONFORMER.id to "de-fc",
+            ModelCatalog.CANARY_180M_DE.id to "canary",
+            ModelCatalog.WHISPER_SMALL.id to "whisper-small",
+        ).getValue(asr.id))
+        val normEmb = System.getenv("O2B_NORM_EMB") == "1"
+        println("ASR-Modell: ${asr.id} (Zeitstempel: ${asr.asrEngine?.hasTokenTimestamps}), Normalisierung Embeddings: $normEmb")
+        SherpaRecognizer(asrDir, asr, 4).use { rec ->
             SherpaEmbedder(File(models, "wespeaker_en_voxceleb_resnet34.onnx"), 4).use { emb ->
                 val pipeline = TranscriptionPipeline(
                     recognizer = rec,
@@ -57,6 +68,7 @@ class SherpaIntegrationTest {
                     speakerSegmenter = { SherpaSegmenter(vad, minSilenceSec = 0.25f, maxSpeechSec = 8f) },
                     embedder = emb,
                     speakers = repo,
+                    normalizeForEmbeddings = normEmb,
                 )
                 // Runde 1: neue Profile; Runde 2/3: Wiedererkennung über Dateien, keine neuen Profile
                 var profilesAfterFirst = 0

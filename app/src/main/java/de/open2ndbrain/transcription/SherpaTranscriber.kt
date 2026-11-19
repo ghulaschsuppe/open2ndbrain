@@ -16,7 +16,8 @@ import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
 /**
- * Transkription mit sherpa-onnx: Silero-VAD, Parakeet TDT v3 und (optional) WeSpeaker-Sprecherprofile.
+ * Transkription mit sherpa-onnx: Silero-VAD, ASR-Modell aus [TranscriberConfig.asrModel] (FastConformer, Canary,
+ * Parakeet, Whisper) und (optional) WeSpeaker-Sprecherprofile.
  *
  * - Modelle werden beim ersten [transcribe] geladen und bis [close] gehalten (~1 GB nativer Speicher).
  * - Blockierend, nicht thread-sicher; nur aus einem Hintergrund-Thread aufrufen.
@@ -52,7 +53,8 @@ class SherpaTranscriber(
         val pipeline = TranscriptionPipeline(
             recognizer = recognizer!!,
             asrSegmenter = { SherpaSegmenter(config.vadModelFile, minSilenceSec = 0.5f, maxSpeechSec = 25f) },
-            speakerSegmenter = if (emb != null) {
+            // feine VAD: für Sprecher und für Modelle ohne Token-Zeitstempel (Einheiten je Abschnitt)
+            speakerSegmenter = if (emb != null || !config.asrModel.hasTokenTimestamps()) {
                 { SherpaSegmenter(config.vadModelFile, minSilenceSec = 0.25f, maxSpeechSec = 8f) }
             } else {
                 null
@@ -73,7 +75,7 @@ class SherpaTranscriber(
 
         val transcript = Transcript(
             audioFileName = audioName,
-            asrModelId = ModelCatalog.PARAKEET_V3.id,
+            asrModelId = config.asrModel.id,
             speakerModelId = if (result.speakersUsed) ModelCatalog.WESPEAKER_RESNET34.id else null,
             createdAtEpochMs = System.currentTimeMillis(),
             audioDurationMs = samplesToMs(result.decodedSamples).takeIf { it > 0 } ?: recording.durationMs,
@@ -121,7 +123,7 @@ class SherpaTranscriber(
         val t0 = System.currentTimeMillis()
         try {
             requireModelFile(config.vadModelFile)
-            recognizer = SherpaRecognizer(config.asrModelDir, config.numThreads.coerceIn(1, 8))
+            recognizer = SherpaRecognizer(config.asrModelDir, config.asrModel, config.numThreads.coerceIn(1, 8))
             embedder = config.speakerModelFile?.let { SherpaEmbedder(it, config.numThreads.coerceIn(1, 4)) }
         } catch (e: Throwable) {
             releaseModels()
@@ -146,3 +148,5 @@ class SherpaTranscriber(
         const val TAG = "O2B-ML"
     }
 }
+
+private fun de.open2ndbrain.core.ModelSpec.hasTokenTimestamps() = asrEngine?.hasTokenTimestamps ?: true

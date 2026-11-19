@@ -1,16 +1,22 @@
 package de.open2ndbrain.transcription
 
 import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineCanaryModelConfig
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
+import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
+import de.open2ndbrain.core.AsrEngine
+import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.ModelLoadException
+import de.open2ndbrain.core.ModelSpec
 import java.io.File
 
 /** Prüft Modelldateien vor dem Laden (die native Bibliothek bricht bei fehlenden Dateien sonst hart ab). */
@@ -105,8 +111,24 @@ internal class SherpaSegmenter(
 }
 
 /** Parakeet TDT (NeMo-Transducer) über den OfflineRecognizer, greedy. */
-internal class SherpaRecognizer(modelDir: File, numThreads: Int) : Recognizer, AutoCloseable {
-    private val recognizer = loadModel("Parakeet") { OfflineRecognizer(
+/**
+ * Spracherkennung über den OfflineRecognizer, je nach [AsrEngine] des Modells konfiguriert (greedy).
+ * Dateinamen kommen aus [ModelSpec.files]; die Sprache bei Canary/Whisper aus [ModelSpec.language].
+ */
+internal class SherpaRecognizer(private val modelDir: File, private val spec: ModelSpec, numThreads: Int) : Recognizer, AutoCloseable {
+    /** Bisheriger Aufruf (Parakeet), z. B. aus Tests. */
+    constructor(modelDir: File, numThreads: Int) : this(modelDir, ModelCatalog.PARAKEET_V3, numThreads)
+
+    private val engine: AsrEngine = spec.asrEngine ?: throw ModelLoadException("${spec.id} ist kein ASR-Modell")
+
+    override val hasTokenTimestamps: Boolean get() = engine.hasTokenTimestamps
+
+    private fun file(part: String): String {
+        val f = spec.files.firstOrNull { it.name.contains(part) } ?: throw ModelLoadException("${spec.id}: keine Datei „$part“ im Katalog")
+        return requireModelFile(File(modelDir, f.name))
+    }
+
+    private val recognizer = loadModel(spec.displayName) { OfflineRecognizer(
         null,
         OfflineRecognizerConfig().apply {
             featConfig = FeatureConfig().apply {
@@ -114,14 +136,33 @@ internal class SherpaRecognizer(modelDir: File, numThreads: Int) : Recognizer, A
                 featureDim = 80
             }
             modelConfig = OfflineModelConfig().apply {
-                transducer = OfflineTransducerModelConfig().apply {
-                    encoder = requireModelFile(File(modelDir, "encoder.int8.onnx"))
-                    decoder = requireModelFile(File(modelDir, "decoder.int8.onnx"))
-                    joiner = requireModelFile(File(modelDir, "joiner.int8.onnx"))
+                val lang = spec.language ?: "de"
+                when (engine) {
+                    AsrEngine.NemoTransducer -> {
+                        transducer = OfflineTransducerModelConfig().apply {
+                            encoder = file("encoder")
+                            decoder = file("decoder")
+                            joiner = file("joiner")
+                        }
+                        modelType = "nemo_transducer"
+                    }
+                    AsrEngine.NemoCtc -> nemo = OfflineNemoEncDecCtcModelConfig().apply { model = file("model") }
+                    AsrEngine.NemoCanary -> canary = OfflineCanaryModelConfig().apply {
+                        encoder = file("encoder")
+                        decoder = file("decoder")
+                        srcLang = lang
+                        tgtLang = lang
+                        usePnc = true
+                    }
+                    AsrEngine.Whisper -> whisper = OfflineWhisperModelConfig().apply {
+                        encoder = file("encoder")
+                        decoder = file("decoder")
+                        language = lang
+                        task = "transcribe"
+                    }
                 }
-                tokens = requireModelFile(File(modelDir, "tokens.txt"))
+                tokens = file("tokens")
                 this.numThreads = numThreads
-                modelType = "nemo_transducer"
                 provider = "cpu"
                 debug = false
             }
@@ -135,6 +176,8 @@ internal class SherpaRecognizer(modelDir: File, numThreads: Int) : Recognizer, A
             stream.acceptWaveform(samples, SAMPLE_RATE)
             recognizer.decode(stream)
             val r = recognizer.getResult(stream)
+            // Ohne Token-Zeitstempel: ein „Token“ mit dem ganzen Text am Blockanfang
+            if (!engine.hasTokenTimestamps) return listOf(RawToken(r.text, 0f, samples.size / SAMPLE_RATE.toFloat()))
             val toks = r.tokens
             val ts = r.timestamps
             val ds = r.durations

@@ -173,10 +173,10 @@ internal object UtteranceBuilder {
 
         fun flush() {
             if (cur.isEmpty()) return
-            val text = cur.joinToString("") { it.text }.replace(Regex("\\s+"), " ").trim()
+            val text = TextCleanup.clean(cur.joinToString("") { it.text })
             val first = cur.first()
             val last = cur.last()
-            if (text.isNotEmpty()) {
+            if (text.any { it.isLetterOrDigit() } && !TextCleanup.isHallucination(text)) { // nur Satzzeichen → verwerfen
                 out += Utterance(
                     fileOffsetMs = first.startMs,
                     durationMs = (last.startMs + last.durationMs - first.startMs).coerceAtLeast(1),
