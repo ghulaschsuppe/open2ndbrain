@@ -97,6 +97,14 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Optionaler Integrationstest mit Linux-JNI von sherpa-onnx (siehe SherpaIntegrationTest)
+        unitTests.all { test ->
+            System.getenv("O2B_SHERPA_JNI")?.let { test.systemProperty("java.library.path", it) }
+            listOf("O2B_SHERPA_JNI", "O2B_MODELS", "O2B_TEST_WAV", "O2B_TEST_TRUTH").forEach { k ->
+                System.getenv(k)?.let { test.environment(k, it) }
+            }
+            test.testLogging { showStandardStreams = System.getenv("O2B_SHERPA_JNI") != null }
+        }
     }
 }
 
