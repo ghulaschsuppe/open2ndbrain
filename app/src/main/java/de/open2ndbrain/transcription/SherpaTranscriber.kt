@@ -10,6 +10,8 @@ import de.open2ndbrain.core.Transcriber
 import de.open2ndbrain.core.TranscriberConfig
 import de.open2ndbrain.core.Transcript
 import de.open2ndbrain.speakers.SpeakerMatcher
+import de.open2ndbrain.speakers.SpeakerUpdate
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
@@ -79,13 +81,18 @@ class SherpaTranscriber(
             utterances = result.utterances,
         )
         TranscriptFiles.write(audio, transcript)
-        // Erst jetzt die Profile ändern (bei Abbruch/Fehler davor bleiben sie unverändert)
-        val update = result.speakerUpdate
-        if (matcher != null && update != null && update.entries.isNotEmpty()) {
+        // Erst jetzt die Profile ändern (bei Abbruch/Fehler davor bleiben sie unverändert). Auch ohne Sprecher
+        // aufrufen: ein früherer Beitrag dieser Datei wird dann abgezogen.
+        if (matcher != null) {
             try {
-                runBlocking { matcher.apply(update, audioName, seenAt) }
-            } catch (e: IOException) {
-                Log.e(TAG, "Sprecherprofile nicht aktualisiert (${audio.name})", e)
+                applySpeakersUninterruptibly(matcher, result.speakerUpdate ?: SpeakerUpdate(emptyList()), audioName, seenAt)
+            } catch (e: InterruptedException) {
+                throw e // Speichern läuft nicht abbrechbar zu Ende; Transkript bleibt gültig
+            } catch (e: Exception) {
+                // Transkript und Profile sollen zusammenpassen: Transkript verwerfen → pending() reiht neu ein
+                Log.e(TAG, "Sprecherprofile nicht aktualisiert (${audio.name}) – Transkript wird verworfen", e)
+                runCatching { TranscriptFiles.delete(audio) }
+                throw IOException("Sprecherprofile nicht speicherbar: ${e.message ?: e.javaClass.simpleName}", e)
             }
         }
         Log.i(
@@ -94,6 +101,19 @@ class SherpaTranscriber(
                 "in ${transcript.processingMs / 1000} s",
         )
         return transcript
+    }
+
+    /**
+     * [SpeakerMatcher.apply] ohne Abbruch: ein gesetztes Interrupt-Flag wird vorübergehend gelöscht (sonst bräche
+     * runBlocking sofort ab) und danach wiederhergestellt. Das Speichern selbst ist im Repository nicht abbrechbar.
+     */
+    private fun applySpeakersUninterruptibly(matcher: SpeakerMatcher, update: SpeakerUpdate, audioName: String, seenAt: Long) {
+        val wasInterrupted = Thread.interrupted()
+        try {
+            runBlocking(NonCancellable) { matcher.apply(update, audioName, seenAt) }
+        } finally {
+            if (wasInterrupted) Thread.currentThread().interrupt()
+        }
     }
 
     private fun ensureLoaded() {

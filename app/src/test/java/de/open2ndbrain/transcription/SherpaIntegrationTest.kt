@@ -46,7 +46,7 @@ class SherpaIntegrationTest {
         val vad = File(models, "silero_vad.onnx")
         val speakersDir = Files.createTempDirectory("spk").toFile()
         val repo = FileSpeakerRepository(speakersDir)
-        val start = 1_700_000_000_000L
+        val start = System.currentTimeMillis() - 3_600_000L // realistisch: Profile gelten als „kürzlich gehört“
         var idToTruth: Map<String?, String> = emptyMap()
 
         SherpaRecognizer(File(models, "parakeet"), 4).use { rec ->
