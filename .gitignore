@@ -11,3 +11,6 @@ build/
 
 # Arbeitskopien der Agenten
 /.claude/worktrees/
+
+# Heruntergeladene Bibliotheken (siehe app/build.gradle.kts)
+/third_party/
