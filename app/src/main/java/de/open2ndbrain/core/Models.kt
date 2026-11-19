@@ -112,14 +112,14 @@ object ModelCatalog {
             hfFile("sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8", "tokens.txt",
                 "2dae6fc7815f9640645e0c765522b278ee0cef49b482d91f6913e334628d3e77", 53_555),
         ),
-        description = "Höchste Genauigkeit im Test, Sprache fest auf Deutsch. Etwa 3× langsamer als „Deutsch – schnell“.",
+        description = "Höchste Genauigkeit im Test, Sprache fest auf Deutsch. Deutlich langsamer (in Gesprächen etwa 10× so viel Rechenzeit wie „Deutsch – schnell“) – eher für Meetings oder „Nur beim Laden“.",
         languages = "Deutsch (fest); kann auch Englisch, Spanisch, Französisch",
         license = "CC-BY-4.0",
         attribution = "NVIDIA canary-180m-flash, ONNX-Export von k2-fsa/sherpa-onnx",
         required = false,
         asrEngine = AsrEngine.NemoCanary,
         language = "de",
-        benchmark = AsrBenchmark(werCleanPct = 5.9, werEverydayPct = 16.6, realTimeFactor = 0.09),
+        benchmark = AsrBenchmark(werCleanPct = 5.9, werEverydayPct = 16.6, realTimeFactor = 0.35),
     )
 
     val WHISPER_SMALL = ModelSpec(
@@ -141,7 +141,7 @@ object ModelCatalog {
         required = false,
         asrEngine = AsrEngine.Whisper,
         language = "de",
-        benchmark = AsrBenchmark(werCleanPct = 9.3, werEverydayPct = 35.5, realTimeFactor = 0.26),
+        benchmark = AsrBenchmark(werCleanPct = 9.3, werEverydayPct = 35.5, realTimeFactor = 0.35),
     )
 
     val SILERO_VAD = ModelSpec(

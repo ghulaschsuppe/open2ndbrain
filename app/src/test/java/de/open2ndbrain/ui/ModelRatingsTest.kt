@@ -14,7 +14,7 @@ class ModelRatingsTest {
         assertEquals(5, ModelRatings.speed(fast).level) // 0,03× → sehr schnell
         val canary = ModelCatalog.CANARY_180M_DE.benchmark!!
         assertEquals(5, ModelRatings.accuracy(canary).level)
-        assertEquals(4, ModelRatings.speed(canary).level)
+        assertEquals(1, ModelRatings.speed(canary).level) // 0,35× in Gesprächen → sehr langsam
         val parakeet = ModelCatalog.PARAKEET_V3.benchmark!!
         assertEquals(2, ModelRatings.accuracy(parakeet).level)
         assertEquals(3, ModelRatings.speed(parakeet).level)
