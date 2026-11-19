@@ -88,6 +88,17 @@ class SpeechGateTest {
     }
 
     @Test
+    fun boundaryStartsSegmentWithoutDroppingPreRoll() {
+        val g = gate()
+        g.feed(0 until 100) { false }
+        g.process(shortArrayOf(100, 0, 0, 0), 4, 100 * 20L, speech = false, boundary = true) // Uhrsprung im Vorlauf
+        g.feed(101 until 120) { true }
+        // Vorlauf bleibt vollständig (51..100), das Segment beginnt erneut an Frame 100
+        assertEquals((51 until 120).toList(), out.map { it.index })
+        assertEquals(listOf(51, 100), out.filter { it.segmentStart }.map { it.index })
+    }
+
+    @Test
     fun switchingToPassthroughFlushesPreRoll() {
         val g = gate()
         g.feed(0 until 100) { false }

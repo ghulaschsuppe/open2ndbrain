@@ -1,17 +1,22 @@
 package de.open2ndbrain.audio
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.AudioRecordingConfiguration
+import android.media.AudioRouting
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Process
 import android.os.SystemClock
+import android.system.ErrnoException
+import android.system.OsConstants
 import android.util.Log
 import androidx.core.content.ContextCompat
 import de.open2ndbrain.audio.vad.AudioLevels
@@ -26,20 +31,24 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 /**
  * Aufnahme-Engine: AudioRecord (16 kHz, mono, PCM16) → Pegel → VAD → Gate → stündliche Opus/OGG-Dateien.
  *
  * Threads je Sitzung (start … stop):
  * - **Capture** (`THREAD_PRIORITY_URGENT_AUDIO`): liest 20-ms-Frames, Pegel, VAD, Gate, Mikrofon-belegt-
- *   Erkennung, Geräteumschaltung. Blockiert nie auf Encoder oder Datenträger.
- * - **Writer**: Encoder/Muxer, Rotation, Sidecars, Wiederherstellung, `storedMsToday`.
- * - **Router** (HandlerThread): [AudioRouter] samt Android-Callbacks.
+ *   Erkennung, Geräteumschaltung. Blockiert nie auf Encoder oder Datenträger. Überwacht den Writer.
+ * - **Writer**: Encoder/Muxer, Rotation, Sidecars, Wiederherstellung, `storedMsToday`, Notlöschung,
+ *   Watchdog für ein hängendes `AudioRecord.read()`.
+ * - **Router** (HandlerThread): [AudioRouter] samt Android-Callbacks (Geräte, Aufnahme-Konfiguration, Routing).
  *
+ * Alle öffentlichen Methoden senden nur Befehle und kehren sofort zurück.
  * Fehler in den Threads werden gefangen → Status `Error` + Meldung, Neuversuch mit Backoff 2…30 s.
  */
 class AudioRecordingEngine(context: Context) : RecordingEngine {
@@ -51,7 +60,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
 
     private val lock = Any()
     private var session: Session? = null
-    private var lastWriterThread: Thread? = null
+    private var lastSession: Session? = null
 
     override fun start(config: EngineConfig) {
         synchronized(lock) {
@@ -63,9 +72,9 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 return
             }
             Log.i(TAG, "start: $config")
-            val ns = Session(config, lastWriterThread)
+            val ns = Session(config, lastSession?.writerThread)
             session = ns
-            lastWriterThread = ns.writerThread
+            lastSession = ns
             ns.launch()
         }
     }
@@ -87,8 +96,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
             }
             Log.i(TAG, "stop")
             session = null
-            s.send(Cmd.Stop)
-            s.unblockIfStalled()
+            s.send(Cmd.Stop) // hängt read(), entblockt der Watchdog im Writer-Thread
         }
     }
 
@@ -136,20 +144,34 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         @Volatile private var pendingPreferred: Array<AudioDeviceInfo?>? = null
         @Volatile private var activeRecord: AudioRecord? = null
         @Volatile private var lastFrameAt = 0L
+        @Volatile private var paused = false
+        @Volatile private var busyCheckRequested = false
+        @Volatile private var routeCheckRequested = false
 
-        val writerThread = Thread({ writerLoop() }, "O2B-AudioWriter")
+        @Volatile var writerThread: Thread = Thread({ writerLoop(restart = false) }, "O2B-AudioWriter")
+            private set
         private val captureThread = Thread({ captureLoop() }, "O2B-AudioCapture")
         private val routerThread = HandlerThread("O2B-AudioRouter")
         private lateinit var router: AudioRouter
+        private lateinit var cbHandler: Handler
+
+        private val recordingCallback = object : AudioManager.AudioRecordingCallback() {
+            override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>?) {
+                busyCheckRequested = true
+            }
+        }
+        private val routingListener = AudioRouting.OnRoutingChangedListener { routeCheckRequested = true }
 
         fun send(cmd: Cmd) {
             cmds.add(cmd)
         }
 
         fun launch() {
+            RecordingSignals.sessionStarted()
             update { it.copy(status = EngineStatus.Recording, sessionStartedAt = startedAt, errorMessage = null) }
             routerThread.start()
-            router = AudioRouter(appContext, Handler(routerThread.looper), object : AudioRouter.Listener {
+            cbHandler = Handler(routerThread.looper)
+            router = AudioRouter(appContext, cbHandler, object : AudioRouter.Listener {
                 override fun onInputsChanged(inputs: List<AudioInputInfo>) {
                     update { it.copy(availableInputs = inputs) }
                 }
@@ -160,6 +182,8 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 }
             })
             router.start(config.micPreference, active = true)
+            runCatching { audioManager.registerAudioRecordingCallback(recordingCallback, cbHandler) }
+                .onFailure { Log.w(TAG, "AudioRecordingCallback nicht registrierbar", it) }
             writerQueue.add(WItem.Settings(settingsOf(config)))
             writerThread.start()
             captureThread.start()
@@ -173,7 +197,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         }
 
         /** Hängt read() (Treiber liefert nichts mehr), löst stop() am AudioRecord die Blockade. */
-        fun unblockIfStalled() {
+        private fun unblockIfStalled() {
             val rec = activeRecord ?: return
             if (SystemClock.elapsedRealtime() - lastFrameAt > STALL_MS) {
                 Log.w(TAG, "Aufnahme hängt – AudioRecord wird angehalten")
@@ -185,7 +209,6 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
 
         private var record: AudioRecord? = null
         private var preferredDevice: AudioDeviceInfo? = null
-        private var paused = false
         private var stopRequested = false
         private var retryAt = 0L
         private var failures = 0
@@ -193,21 +216,26 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         private var captureError: String? = null
         private var openFailedBusy = false
         private var busy = Busy.NONE
+        private var busySince = 0L
         private var silencedSince = 0L
         private var freeSince = 0L
         private var zeroMs = 0L
         private var lastBusyCheck = 0L
         private var lastRouteCheck = 0L
+        private var lastStatusPublish = 0L
+        private var lastWriterCheck = 0L
         private var lastInput: AudioInputInfo? = null
         private var inputName: String? = null
         private var levelMax = 0.0
         private var levelFrames = 0
+        private var publishedLevel = -1f
+        private var publishedSpeech = false
         private var lastSpeech = false
         private var gapPending = false
         private var lastBusyReopen = 0L
 
         private val frame = ShortArray(FRAME_SAMPLES)
-        private val clock = FrameClock(SAMPLE_RATE)
+        private val clock = FrameClock(SAMPLE_RATE, hourStart = { RecordingLayout.hourStart(it, ZoneId.systemDefault()) })
         private val vad: VoiceActivityDetector = EnergyVad(SAMPLE_RATE)
         private val gate = SpeechGate(FRAME_SAMPLES, PRE_ROLL_FRAMES, POST_ROLL_FRAMES, initial.discardSilence) { pcm, len, ts, segStart ->
             if (writerQueue.size >= MAX_QUEUED_ITEMS) {
@@ -233,8 +261,10 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 }
             }
             closeRecord()
+            runCatching { audioManager.unregisterAudioRecordingCallback(recordingCallback) }
             writerQueue.add(WItem.Close("stopped"))
             writerQueue.add(WItem.Quit)
+            ensureWriterAlive() // sonst würden Close/Quit nie verarbeitet
             runCatching { router.stop() }
             routerThread.quitSafely()
             Log.i(TAG, "Capture-Thread beendet")
@@ -244,6 +274,12 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
             // Befehle
             while (true) handle(cmds.poll() ?: break)
             if (stopRequested) return
+
+            val now0 = SystemClock.elapsedRealtime()
+            if (now0 - lastWriterCheck >= WRITER_CHECK_MS) {
+                lastWriterCheck = now0
+                ensureWriterAlive()
+            }
 
             if (paused) {
                 handle(cmds.poll(500, TimeUnit.MILLISECONDS) ?: return)
@@ -279,6 +315,8 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 vad.reset()
                 // silencedSince/zeroMs bleiben erhalten: Neuöffnen während „belegt“ soll nicht flackern.
                 lastRouteCheck = 0
+                busyCheckRequested = true
+                runCatching { rec.addOnRoutingChangedListener(routingListener, cbHandler) }
                 Log.i(TAG, "AudioRecord geöffnet (Quelle ${rec.audioSource}, Session ${rec.audioSessionId})")
             }
 
@@ -287,6 +325,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 preferredDevice = holder[0]
                 runCatching { rec.setPreferredDevice(preferredDevice) }
                     .onFailure { Log.w(TAG, "setPreferredDevice fehlgeschlagen", it) }
+                routeCheckRequested = true
             }
 
             val n = rec.read(frame, 0, FRAME_SAMPLES, AudioRecord.READ_BLOCKING)
@@ -303,44 +342,62 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
             lastFrameAt = nowRt
             if (failures > 0 && nowRt - openedAt > STABLE_MS) failures = 0
             val ts = clock.frameStart(n, nowMs)
-            if (clock.lastWasJump) {
-                Log.i(TAG, "Zeitsprung erkannt – neues Segment")
-                gate.discontinuity()
-            }
+            val boundary = clock.lastWasJump
+            if (boundary) Log.i(TAG, "Zeitsprung erkannt – neues Segment")
 
-            // Pegel ~10×/s
+            // Pegel ~10×/s berechnen, aber nur bei merklicher Änderung veröffentlichen
             val rms = AudioLevels.rms(frame, 0, n)
             if (rms > levelMax) levelMax = rms
             if (++levelFrames >= LEVEL_EVERY_FRAMES) {
                 val level = AudioLevels.displayLevel(levelMax)
                 levelMax = 0.0
                 levelFrames = 0
-                update { it.copy(level = level, speechActive = lastSpeech) }
+                if (abs(level - publishedLevel) > LEVEL_DELTA || lastSpeech != publishedSpeech) {
+                    publishedLevel = level
+                    publishedSpeech = lastSpeech
+                    val speech = lastSpeech
+                    update { it.copy(level = level, speechActive = speech) }
+                }
             }
 
-            // Mikrofon belegt?
+            // Mikrofon belegt? (Callback-gesteuert, Polling nur als Rückfall bzw. in Übergängen)
             var allZero = true
             for (i in 0 until n) if (frame[i].toInt() != 0) { allZero = false; break }
+            val prevZeroMs = zeroMs
             zeroMs = if (allZero) zeroMs + n * 1000L / SAMPLE_RATE else 0
-            if (nowRt - lastBusyCheck >= BUSY_CHECK_MS) {
+            val zeroTransition = (busy == Busy.NONE && prevZeroMs < ZERO_SIGNAL_MS && zeroMs >= ZERO_SIGNAL_MS) ||
+                (busy != Busy.NONE && prevZeroMs > 0 && zeroMs == 0L)
+            val transitional = (silencedSince != 0L && busy != Busy.BACKGROUND) || freeSince != 0L
+            if (busyCheckRequested || zeroTransition || nowRt - lastBusyCheck >= FALLBACK_CHECK_MS ||
+                (transitional && nowRt - lastBusyCheck >= BUSY_CHECK_MS)
+            ) {
+                busyCheckRequested = false
                 lastBusyCheck = nowRt
                 checkBusy(rec, nowRt)
+            }
+            if (routeCheckRequested || lastRouteCheck == 0L || nowRt - lastRouteCheck >= FALLBACK_CHECK_MS) {
+                routeCheckRequested = false
                 checkRoute(rec, nowRt)
+            }
+            if (nowRt - lastStatusPublish >= STATUS_PUBLISH_MS) {
+                lastStatusPublish = nowRt
                 publishStatus()
             }
             if (busy != Busy.NONE) {
                 lastSpeech = false
-                if (nowRt - lastBusyReopen >= BUSY_REOPEN_MS) {
-                    // Regelmäßig neu öffnen – manche Geräte heben die Stummschaltung sonst nicht auf.
+                // Regelmäßig neu öffnen – manche Geräte heben die Stummschaltung sonst nicht auf.
+                // In der ersten Minute alle 10 s, danach alle 60 s (Akku bei dauerhafter Sperre).
+                val interval = if (nowRt - busySince < BUSY_LONG_AFTER_MS) BUSY_REOPEN_MS else BUSY_REOPEN_LONG_MS
+                if (nowRt - lastBusyReopen >= interval) {
                     lastBusyReopen = nowRt
                     closeRecord()
-                    retryAt = nowRt + 200
+                    retryAt = nowRt + QUICK_RETRY_MS
                 }
                 return
             }
 
             lastSpeech = vad.accept(frame, 0, n)
-            gate.process(frame, n, ts, lastSpeech)
+            gate.process(frame, n, ts, lastSpeech, boundary)
         }
 
         private fun handle(cmd: Cmd) {
@@ -413,10 +470,25 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
             val rec = record ?: return
             record = null
             activeRecord = null
+            runCatching { rec.removeOnRoutingChangedListener(routingListener) }
             runCatching { rec.stop() }
             runCatching { rec.release() }
             gate.discontinuity()
+            publishedLevel = 0f
+            publishedSpeech = false
             update { it.copy(level = 0f, speechActive = false) }
+        }
+
+        /** Writer-Thread abgestürzt? → Fehler melden und neu starten (offene Datei wird gerettet). */
+        private fun ensureWriterAlive() {
+            val t = writerThread
+            if (t.isAlive || t.state == Thread.State.NEW) return
+            Log.e(TAG, "Writer-Thread ausgefallen – Neustart")
+            writerError = MSG_WRITER_DIED
+            if (!paused) update { it.copy(status = EngineStatus.Error, errorMessage = MSG_WRITER_DIED) }
+            val nt = Thread({ writerLoop(restart = true) }, "O2B-AudioWriter")
+            writerThread = nt
+            nt.start()
         }
 
         private fun isCallMode(): Boolean = when (audioManager.mode) {
@@ -468,16 +540,20 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 gate.discontinuity()
                 vad.reset()
                 lastBusyReopen = nowRt
+                busySince = nowRt
             } else if (newBusy == Busy.NONE) {
                 Log.i(TAG, "Mikrofon wieder frei")
                 writerQueue.add(WItem.Event("mic_free", null, nowMs))
             }
             busy = newBusy
+            publishStatus()
         }
 
-        /** Tatsächlich geroutetes Mikrofon verfolgen; Wechsel → Ereignis + neue Teildatei. */
+        /**
+         * Tatsächlich geroutetes Mikrofon verfolgen. Ein Wechsel ergibt nur ein Ereignis `mic_changed`;
+         * der Writer beginnt ein neues Segment (anderer `input`), die Datei läuft weiter.
+         */
         private fun checkRoute(rec: AudioRecord, nowRt: Long) {
-            if (nowRt - lastRouteCheck < ROUTE_CHECK_MS) return
             lastRouteCheck = nowRt
             val dev = runCatching { rec.routedDevice }.getOrNull() ?: return
             val info = AudioRouter.toInfo(dev)
@@ -486,13 +562,12 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
             lastInput = info
             inputName = info.name
             update { it.copy(currentInput = info) }
+            val nowMs = System.currentTimeMillis()
             if (prev != null) {
                 Log.i(TAG, "Mikrofon gewechselt: ${prev.name} → ${info.name}")
-                writerQueue.add(WItem.Split("mic_changed", "${prev.name} → ${info.name}"))
-                gate.discontinuity()
-                vad.reset()
+                writerQueue.add(WItem.Event("mic_changed", "${prev.name} → ${info.name}", nowMs))
             } else {
-                writerQueue.add(WItem.Event("input", info.name, System.currentTimeMillis()))
+                writerQueue.add(WItem.Event("input", info.name, nowMs))
             }
         }
 
@@ -560,11 +635,12 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
 
         private var storedDay: LocalDate? = null
         private var storedBase = 0L
-        private var storedDirty = true
+        @Volatile private var storedDirty = true
         private var lastStoredPublish = 0L
         private var writerRetryAt = 0L
         private var writerBackoff = BACKOFF_START_MS
         private var writerGap = false
+        private var nextStorageCheck = 0L
 
         private val writer = HourlyWriter(
             encoderFactory = MediaCodecAudioEncoder.FACTORY,
@@ -578,32 +654,44 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
             },
         )
 
-        private fun writerLoop() {
+        private fun writerLoop(restart: Boolean) {
             runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE) }
             try {
-                previousWriter?.let { if (it.isAlive) it.join(PREVIOUS_JOIN_MS) }
-                runCatching {
-                    val n = PartFileRecovery.recover(config.outputRoot, ZoneId.systemDefault(), RecordingSignals.activeFiles)
-                    if (n > 0) {
-                        Log.i(TAG, "$n verwaiste Teildatei(en) wiederhergestellt")
-                        RecordingSignals.notifyChanged()
-                    }
-                }.onFailure { Log.e(TAG, "Wiederherstellung fehlgeschlagen", it) }
+                if (restart) {
+                    // Zustand des abgestürzten Writers: offene Datei so gut wie möglich retten.
+                    runCatching { writer.abort("writer_restart") }
+                } else {
+                    previousWriter?.let { if (it.isAlive) it.join(PREVIOUS_JOIN_MS) }
+                    runCatching {
+                        val n = RecordingSignals.recoverForEngine(config.outputRoot)
+                        if (n > 0) {
+                            Log.i(TAG, "$n verwaiste Teildatei(en) wiederhergestellt")
+                            RecordingSignals.notifyChanged()
+                        }
+                    }.onFailure { Log.e(TAG, "Wiederherstellung fehlgeschlagen", it) }
+                }
 
                 while (true) {
-                    val item = writerQueue.poll(WRITER_POLL_MS, TimeUnit.MILLISECONDS)
-                    if (item === WItem.Quit) break
-                    if (item != null) process(item)
-                    housekeeping()
+                    try {
+                        val item = writerQueue.poll(WRITER_POLL_MS, TimeUnit.MILLISECONDS)
+                        if (item === WItem.Quit) break
+                        if (item != null) process(item)
+                        housekeeping()
+                    } catch (t: Throwable) {
+                        // Nie den Writer verlieren: protokollieren und weitermachen.
+                        Log.e(TAG, "Unerwarteter Fehler im Writer-Thread", t)
+                        runCatching { Thread.sleep(100) }
+                    }
                 }
-            } catch (t: Throwable) {
-                Log.e(TAG, "Writer-Thread unerwartet beendet", t)
-            } finally {
                 runCatching { writer.close("stopped") }
+                RecordingSignals.sessionEnded()
                 Log.i(TAG, "Writer-Thread beendet")
                 synchronized(lock) {
                     if (session == null) publishIdle()
                 }
+            } catch (t: Throwable) {
+                // Nur bei schwerem Fehler (z. B. außerhalb der Schleife); die Capture-Seite startet neu.
+                Log.e(TAG, "Writer-Thread unerwartet beendet", t)
             }
         }
 
@@ -617,6 +705,7 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                         }
                         writer.write(item.pcm, item.pcm.size, item.epochMs, item.segmentStart || writerGap, item.input)
                         writerGap = false
+                        // Fehler gilt erst nach erfolgreichem Schreiben als behoben.
                         if (writerError != null) {
                             writerError = null
                             writerBackoff = BACKOFF_START_MS
@@ -630,31 +719,46 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
                 }
             } catch (t: Throwable) {
                 Log.e(TAG, "Fehler beim Schreiben", t)
-                val msg = "Schreibfehler: ${t.message ?: t.javaClass.simpleName}"
+                val noSpace = isNoSpace(t, config.outputRoot)
+                val msg = if (noSpace) MSG_NO_SPACE else "Schreibfehler: ${t.message ?: t.javaClass.simpleName}"
                 runCatching { writer.abort(msg) }
                 writerError = msg
                 writerGap = true
                 writerRetryAt = SystemClock.elapsedRealtime() + writerBackoff
                 writerBackoff = (writerBackoff * 2).coerceAtMost(BACKOFF_MAX_MS)
-                update { it.copy(status = EngineStatus.Error, errorMessage = msg) }
+                if (noSpace) nextStorageCheck = 0 // Notlöschung sofort prüfen
+                // Während der Pause bleibt der Status „Paused“; der Fehler zeigt sich nach dem Fortsetzen.
+                if (!paused) update { it.copy(status = EngineStatus.Error, errorMessage = msg) }
             }
         }
 
         private fun housekeeping() {
-            runCatching { writer.tick() }.onFailure { Log.w(TAG, "Sidecar-Sicherung fehlgeschlagen", it) }
+            runCatching { writer.tick(idle = writerQueue.isEmpty()) }
+                .onFailure { Log.w(TAG, "Writer-Tick fehlgeschlagen", it) }
             val nowRt = SystemClock.elapsedRealtime()
-            // Nach Ablauf der Wartezeit wieder „Recording“ melden (sonst bliebe Error bis zur nächsten
-            // Sprache stehen); scheitert der nächste Versuch, kommt der Fehler mit längerem Backoff zurück.
-            if (writerError != null && nowRt >= writerRetryAt) writerError = null
             if (nowRt - lastStoredPublish >= STORED_PUBLISH_MS || storedDirty) {
                 lastStoredPublish = nowRt
                 runCatching { publishStored() }.onFailure { Log.w(TAG, "storedMsToday fehlgeschlagen", it) }
             }
-            // Watchdog: liefert der Treiber keine Daten mehr, read() entblocken.
+            if (nowRt >= nextStorageCheck) {
+                nextStorageCheck = nowRt + STORAGE_CHECK_MS
+                runCatching { emergencyCleanup() }.onFailure { Log.w(TAG, "Notlöschung fehlgeschlagen", it) }
+            }
+            // Watchdog: liefert der Treiber keine Daten mehr, read() entblocken (auch nach stop()).
             if (!paused && activeRecord != null && nowRt - lastFrameAt > STALL_MS) {
                 unblockIfStalled()
                 lastFrameAt = nowRt
             }
+        }
+
+        @SuppressLint("UsableSpace") // bewusst konservativ
+        private fun emergencyCleanup() {
+            val root = config.outputRoot
+            val deleted = StorageJanitor.cleanup(root)
+            if (deleted.isEmpty()) return
+            val detail = "${deleted.size} älteste Aufnahme(n) gelöscht, frei ${root.usableSpace / StorageJanitor.MB} MB"
+            writer.addEvent("storage_cleanup", detail)
+            storedDirty = true
         }
 
         private fun publishStored() {
@@ -686,11 +790,16 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         private const val POST_ROLL_FRAMES = 75 // 1,5 s
         private const val RECORD_BUFFER_SECONDS = 2
         private const val LEVEL_EVERY_FRAMES = 5 // 100 ms
+        private const val LEVEL_DELTA = 0.02f
         private const val BUSY_CHECK_MS = 250L
-        private const val ROUTE_CHECK_MS = 500L
+        private const val FALLBACK_CHECK_MS = 5_000L
+        private const val STATUS_PUBLISH_MS = 250L
+        private const val WRITER_CHECK_MS = 1_000L
         private const val ZERO_SIGNAL_MS = 3_000L
         private const val BACKGROUND_SILENCED_MS = 3_000L
         private const val BUSY_REOPEN_MS = 10_000L
+        private const val BUSY_REOPEN_LONG_MS = 60_000L
+        private const val BUSY_LONG_AFTER_MS = 60_000L
         private const val FREE_CONFIRM_MS = 1_000L
         private const val BACKOFF_START_MS = 2_000L
         private const val QUICK_RETRY_MS = 200L
@@ -700,7 +809,24 @@ class AudioRecordingEngine(context: Context) : RecordingEngine {
         private const val MAX_QUEUED_ITEMS = 3_000 // 60 s Audio
         private const val WRITER_POLL_MS = 500L
         private const val STORED_PUBLISH_MS = 1_000L
+        private const val STORAGE_CHECK_MS = 60_000L
         private const val PREVIOUS_JOIN_MS = 5_000L
         const val MSG_BACKGROUND = "Mikrofon im Hintergrund gesperrt"
+        const val MSG_NO_SPACE = "Speicher voll"
+        const val MSG_WRITER_DIED = "Schreib-Thread ausgefallen – neu gestartet"
+
+        /** ENOSPC in der Ursachenkette oder (fast) kein freier Platz mehr? */
+        @SuppressLint("UsableSpace")
+        internal fun isNoSpace(t: Throwable, root: File?): Boolean {
+            var c: Throwable? = t
+            var depth = 0
+            while (c != null && depth++ < 10) {
+                if (c is ErrnoException && c.errno == OsConstants.ENOSPC) return true
+                val m = c.message.orEmpty()
+                if ("ENOSPC" in m || "No space left" in m) return true
+                c = c.cause
+            }
+            return root != null && runCatching { root.isDirectory && root.usableSpace < 8 * 1024 * 1024 }.getOrDefault(false)
+        }
     }
 }

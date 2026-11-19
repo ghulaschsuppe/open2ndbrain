@@ -27,6 +27,7 @@ internal class SpeechGate(
     private val ring = Array(preRollFrames.coerceAtLeast(1)) { ShortArray(frameSamples) }
     private val ringLen = IntArray(ring.size)
     private val ringTs = LongArray(ring.size)
+    private val ringBoundary = BooleanArray(ring.size)
     private var ringStart = 0
     private var ringCount = 0
 
@@ -40,11 +41,15 @@ internal class SpeechGate(
     /** Wird gerade gespeichert (Sprache + Nachlauf)? */
     val isOpen: Boolean get() = open || !discardSilence
 
-    fun process(pcm: ShortArray, length: Int, epochMs: Long, speech: Boolean) {
+    /**
+     * @param boundary true: dieser Frame folgt zeitlich nicht lückenlos auf den vorigen (z. B. Uhrsprung) –
+     *   er beginnt bei Ausgabe ein neues Segment, Vorlauf und Gate-Zustand bleiben aber erhalten.
+     */
+    fun process(pcm: ShortArray, length: Int, epochMs: Long, speech: Boolean, boundary: Boolean = false) {
         if (!discardSilence) {
             if (ringCount > 0) flushRing() // Umschalten während Stille: Vorlauf nicht verlieren
             open = false
-            emit(pcm, length, epochMs)
+            emit(pcm, length, epochMs, boundary)
             return
         }
         if (speech) {
@@ -53,18 +58,18 @@ internal class SpeechGate(
                 open = true
             }
             hangover = postRollFrames
-            emit(pcm, length, epochMs)
+            emit(pcm, length, epochMs, boundary)
             return
         }
         if (open) {
             if (hangover > 0) {
                 hangover--
-                emit(pcm, length, epochMs)
+                emit(pcm, length, epochMs, boundary)
                 return
             }
             open = false
         }
-        pushRing(pcm, length, epochMs)
+        pushRing(pcm, length, epochMs, boundary)
     }
 
     /**
@@ -79,8 +84,8 @@ internal class SpeechGate(
         nextIsSegmentStart = true
     }
 
-    private fun emit(pcm: ShortArray, length: Int, epochMs: Long) {
-        val start = nextIsSegmentStart || !hasEmitted || droppedSinceEmit > 0
+    private fun emit(pcm: ShortArray, length: Int, epochMs: Long, boundary: Boolean) {
+        val start = boundary || nextIsSegmentStart || !hasEmitted || droppedSinceEmit > 0
         sink.onFrame(pcm, length, epochMs, start)
         hasEmitted = true
         nextIsSegmentStart = false
@@ -90,13 +95,13 @@ internal class SpeechGate(
     private fun flushRing() {
         for (k in 0 until ringCount) {
             val idx = (ringStart + k) % ring.size
-            emit(ring[idx], ringLen[idx], ringTs[idx])
+            emit(ring[idx], ringLen[idx], ringTs[idx], ringBoundary[idx])
         }
         ringCount = 0
         ringStart = 0
     }
 
-    private fun pushRing(pcm: ShortArray, length: Int, epochMs: Long) {
+    private fun pushRing(pcm: ShortArray, length: Int, epochMs: Long, boundary: Boolean) {
         val idx: Int
         if (ringCount < ring.size) {
             idx = (ringStart + ringCount) % ring.size
@@ -110,5 +115,6 @@ internal class SpeechGate(
         System.arraycopy(pcm, 0, ring[idx], 0, n)
         ringLen[idx] = n
         ringTs[idx] = epochMs
+        ringBoundary[idx] = boundary
     }
 }
