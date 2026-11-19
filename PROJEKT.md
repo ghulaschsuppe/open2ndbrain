@@ -4,16 +4,17 @@ Native Android-App: 24/7-Sprachaufnahme im Hintergrund, Transkription vollständ
 durchsuchbares „Second Brain“ mit optionalem lokalem KI-Modell. Komplett offline – keine Cloud.
 
 - Vorbild: OMI AI – aber komplett offline
-- Plattform: Android (Kotlin, Jetpack Compose), minSdk 29, targetSdk 35
+- Plattform: Android (Kotlin, Jetpack Compose), Android 10–16 (minSdk 29, targetSdk 36), Paket `de.open2ndbrain`
+- Lizenz: GNU AGPL-3.0-or-later (siehe `LICENSE`)
 - Sprache primär: Deutsch (Parakeet TDT 0.6B v3 multilingual)
 
 ## Status
 Phase 0 – Konzept. Siehe [docs/KONZEPT.md](docs/KONZEPT.md).
 
 ## Build & Auslieferung
-- GitHub Actions baut die APK.
-- Entwicklerversionen per FTP nach `https://dev.danerd.de/open2ndbrain/` (Secrets `FTP_SERVER`, `FTP_USER`, `FTP_PASSWORD` – vom Inhaber manuell gepflegt, nie ins Repo).
-- Dort liegt eine kleine PHP-8.1-Downloadseite (ohne Datenbank), die die verfügbaren APKs listet.
+- Ausschließlich über GitHub: GitHub Actions baut die APK, Tags `v*` erzeugen ein GitHub-Release mit APK.
+- **Kein** FTP-Deploy auf dev.danerd.de für dieses Projekt.
+- Signatur-Secrets (`SIGNING_*`) legt der Inhaber bei Bedarf selbst an – nie Schlüssel ins Repo.
 
 ## Konventionen
 - Antworten/Doku auf Deutsch.

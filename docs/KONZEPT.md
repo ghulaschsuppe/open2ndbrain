@@ -67,21 +67,47 @@ Zusätzlich eine **Schnelleinstellungs-Kachel** und ein **Homescreen-Widget** f�
 - Kotlin, Jetpack Compose, Material 3, Coroutines/Flow, Hilt (DI), Room, WorkManager, DataStore
 - **sherpa-onnx** (Apache-2.0) für Spracherkennung, VAD und später Sprechererkennung – liefert fertige Android/Kotlin-Bindings und unterstützt Parakeet-Modelle
 - **llama.cpp** (MIT) per JNI für das lokale Sprachmodell (Phase 4)
-- minSdk **29** (Android 10: Opus-Encoder + OGG-Muxer im System, Foreground-Service-Typ „microphone“), targetSdk 35
+- **Kompatibilität: alle modernen Android-Versionen, Android 10 bis 16.** minSdk **29** (ab Android 10 sind Opus-Encoder,
+  OGG-Muxer und der Vordergrunddienst-Typ „microphone“ im System enthalten), targetSdk/compileSdk **36** (Android 16).
+  Die Sonderregeln von Android 11 (Mikrofon nur „während der Nutzung“), 12 (Startverbote aus dem Hintergrund),
+  13 (Benachrichtigungs-Berechtigung) und 14/15 (Vordergrunddienst-Typen) sind eingeplant (siehe 4.1).
 - ABI: `arm64-v8a` (Modelle sind ohnehin nur auf 64-Bit-Geräten sinnvoll)
 
-> **Lizenz-Hinweis:** sherpa-onnx (Apache-2.0) und llama.cpp (MIT) sind freizügig lizenziert.
-> Die Lizenz von open2ndbrain kannst du daher frei wählen.
+### Lizenz: GNU AGPL-3.0-or-later
+Rechtlich passt das. Alle eingebundenen Bibliotheken dürfen mit der AGPL-3.0 kombiniert werden
+(keine Rechtsberatung, aber das entspricht der gängigen Einschätzung der FSF):
+
+| Komponente | Lizenz | Verträglich mit AGPL-3.0 |
+|---|---|---|
+| sherpa-onnx, AndroidX/Jetpack, Kotlin | Apache-2.0 | ja (Apache-2.0 ist mit (A)GPL**v3** verträglich) |
+| ONNX Runtime, llama.cpp, Silero VAD | MIT | ja |
+| Parakeet TDT v3 (Modell) | CC-BY-4.0 | ja; wird nicht mitgeliefert, sondern geladen → Namensnennung in „Über/Lizenzen“ |
+| Qwen3 (Modell) | Apache-2.0 | ja; wird geladen |
+| Gemma (Modell, optional) | Gemma-Nutzungsbedingungen | nicht im Repo/APK; der Nutzer lädt es selbst und stimmt beim Download zu |
+
+Folgen der AGPL: Der Quelltext muss für jeden, der die App erhält, verfügbar sein – das ist durch das öffentliche
+GitHub-Repo erfüllt. Die Zusatzpflicht der AGPL (Quelltext auch für Nutzer über ein Netzwerk) greift hier
+praktisch nicht, da die App keinen Server betreibt; sie schützt aber davor, dass jemand den Code als Clouddienst
+weiterverwendet, ohne seine Änderungen offenzulegen. Die App bekommt einen Bildschirm „Open-Source-Lizenzen“,
+der Lizenztext liegt in `LICENSE`.
 
 ---
 
 ## 4. Aufnahme-Kern (das Herzstück)
 
-### 4.1 Foreground-Service
+### 4.1 Vordergrunddienst (Foreground Service)
+**Ja – die Aufnahme läuft zwingend als Vordergrunddienst.** Nur so beendet Android sie nicht nach kurzer Zeit:
+Normale Hintergrundprozesse werden vom System nach wenigen Minuten eingefroren und haben ab Android 9 ohnehin
+keinen Zugriff aufs Mikrofon. Ein Vordergrunddienst ist für den Nutzer durch eine dauerhafte Benachrichtigung
+sichtbar und wird deshalb vom System bevorzugt behandelt. Er läuft weiter, wenn die App geschlossen,
+aus der Liste der letzten Apps gewischt oder der Bildschirm ausgeschaltet ist.
+(„Im Hintergrund“ meint in diesem Konzept also immer: *Vordergrunddienst bei ausgeschaltetem Bildschirm / geschlossener App*.)
+
 - `RecorderService` mit `foregroundServiceType="microphone"`, Berechtigungen `RECORD_AUDIO`, `FOREGROUND_SERVICE`,
   `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`, `BLUETOOTH_CONNECT`.
 - Ein `AudioRecord` liest dauerhaft 16 kHz / mono / 16 bit (genau das Format, das die Modelle erwarten → kein Resampling).
 - `START_STICKY` + Watchdog: Stirbt der Prozess, wird neu gestartet und die angefangene Stunde in einer neuen Teildatei fortgesetzt.
+- Ein `PARTIAL_WAKE_LOCK` hält die CPU während der Aufnahme wach. Das ist für das Lesen des Mikrofons nötig und kostet nur wenig Strom.
 - Bei der Einrichtung fragt die App nach der **Ausnahme von der Akku-Optimierung** und zeigt herstellerspezifische Tipps
   (Samsung, Xiaomi, Huawei usw. beenden Hintergrund-Apps aggressiv).
 
@@ -96,11 +122,41 @@ genaue Neustartverhalten nach einem Absturz wird in Phase 1 auf echten Geräten 
 - Dateinamen: `audio/2026/11/19/2026-11-19_14-00.ogg`; bei Unterbrechungen `…_14-00_b.ogg`.
 - Neben jeder Audiodatei liegt eine kleine `.json` mit Mikrofonwechseln, Pausen und den VAD-Sprachabschnitten.
 
-**Speicherbedarf (Opus 16 kbit/s, Sprachqualität):** ca. 7 MB pro Stunde → ca. 170 MB pro Tag → ca. 5 GB pro Monat.
-Optionen:
-- **„Stille verwerfen“** (Standard: an): Die VAD erkennt Sprache; Abschnitte ohne Sprache werden nicht gespeichert.
-  Realistisch sinkt der Bedarf dadurch auf 20–40 %.
-- **Aufbewahrung**: Audio nach X Tagen löschen (z. B. 30), **Transkripte bleiben für immer**. Einzelne Stellen können markiert („📌 behalten“) werden.
+### 4.2a Speicherbedarf (gemessen)
+**Messung:** 24:42 min deutsche Sprache (LibriVox-Hörbuch, gemeinfrei), umgewandelt in 16 kHz mono und
+mit libopus (VBR, Sprachmodus) kodiert. Das entspricht dem Format, das Android per `MediaCodec` erzeugt.
+
+| Format | pro Stunde | 24 h am Stück | Eignung |
+|---|---|---|---|
+| Unkomprimiert (PCM 16 kHz, 16 bit) | 115,2 MB | 2 765 MB | nur als Puffer im RAM |
+| AAC 32 kbit/s (zum Vergleich) | 15,0 MB | 359 MB | – |
+| Opus 24 kbit/s | 10,2 MB | 244 MB | sehr gute Qualität |
+| **Opus 16 kbit/s (Standard)** | **6,8 MB** | **163 MB** | gute Sprachqualität, unkritisch für die Transkription |
+| Opus 12 kbit/s („Sparmodus“) | 5,1 MB | 123 MB | noch gut verständlich |
+| Opus 8 kbit/s | 3,4 MB | 82 MB | hörbare Artefakte → schlechtere Transkription, nicht empfohlen |
+
+Opus ist also rund **17-mal kleiner als unkomprimiertes Audio** (16 kbit/s) und halb so groß wie AAC bei vergleichbarer Sprachqualität.
+
+**Mit „Stille verwerfen“ (Standard: an).** Die VAD erkennt Sprache. Gespeichert werden nur Sprachabschnitte
+plus je ~1 s Vor-/Nachlauf, damit kein Wortanfang fehlt. Hochrechnung für Opus 16 kbit/s
+(die tatsächliche Sprachdauer pro Tag ist individuell, die App zeigt sie in der Statistik an):
+
+| Gesprochen pro Tag (inkl. Umgebungsgespräche) | pro Tag | 30 Tage | 1 Jahr |
+|---|---|---|---|
+| 2 h (ruhiger Tag) | ~16 MB | ~0,5 GB | ~6 GB |
+| 4 h (typisch) | ~33 MB | ~1,0 GB | ~12 GB |
+| 8 h (Büro, viele Gespräche) | ~65 MB | ~2,0 GB | ~24 GB |
+| zum Vergleich: alles speichern, 24 h | 163 MB | 4,9 GB | 60 GB |
+
+**Weitere Daten:**
+- Transkripte inkl. Volltextindex: grob 0,5 MB pro Tag bei 4 h Sprache → **< 200 MB pro Jahr**.
+- Embeddings für die semantische Suche (Phase 4, int8 quantisiert): ~0,1 MB pro Tag → ~35 MB pro Jahr.
+- Modelle (einmalig): Spracherkennung ~650 MB + optional Sprachmodell ~1,2 GB + Embeddings ~120 MB → **~2 GB**.
+
+**Aufbewahrung** (einstellbar): Standard **Audio 30 Tage**, danach automatisch löschen. **Transkripte bleiben für immer.**
+Einzelne Stellen lassen sich markieren („📌 behalten“), dann bleibt ihr Audio erhalten. Bei typischer Nutzung belegt die App
+damit dauerhaft nur etwa **1 GB Audio + wenige hundert MB Text**. Wird der freie Speicher knapp (< 2 GB),
+warnt die App und löscht notfalls das älteste nicht markierte Audio zuerst.
 
 ### 4.3 Bluetooth-Mikrofone
 - `AudioRouter` beobachtet die Geräte per `AudioDeviceCallback`.
@@ -215,18 +271,25 @@ Deshalb bleibt die Suche das Fundament und die KI ist ein Aufsatz.
 | **5 – Komfort** | Fragen/Chat mit Quellen, Sprechererkennung & -namen, Verschlüsselung, Widget, Obsidian-Sync-Ordner | Ausbau |
 
 **Build & Verteilung**
-- GitHub Actions: Bei jedem Push auf den Entwicklungszweig wird eine Debug-APK gebaut (inkl. Unit-Tests/Lint).
-- Upload per FTP nach `https://dev.danerd.de/open2ndbrain/` (Secrets `FTP_SERVER`, `FTP_USER`, `FTP_PASSWORD`).
-  Dort eine kleine `index.php` (PHP 8.1, ohne Datenbank), die die vorhandenen APKs mit Datum/Version zum Download auflistet –
-  so installierst du neue Testversionen direkt am Handy.
-- Für Release-Builds später ein Signaturschlüssel als GitHub-Secret (von dir angelegt).
+Alles läuft über GitHub, **kein FTP-Upload**:
+- **GitHub Actions** baut bei jedem Push eine APK (inkl. Unit-Tests und Lint). Die APK hängt als Artefakt am Workflow-Lauf.
+- **GitHub Releases:** Ein Tag `v*` (z. B. `v0.1.0`) erzeugt automatisch ein Release mit der fertigen APK.
+  Von dort installierst du sie direkt am Handy. Bequem für automatische Updates: die Open-Source-App
+  **Obtainium** verfolgt die GitHub-Releases und meldet neue Versionen.
+- **Signatur:** Damit Updates sich über die vorherige Version installieren lassen, muss jede APK mit demselben Schlüssel
+  signiert sein. Dafür legst du bei Bedarf selbst die Secrets `SIGNING_KEYSTORE_BASE64`, `SIGNING_KEYSTORE_PASSWORD`,
+  `SIGNING_KEY_ALIAS` und `SIGNING_KEY_PASSWORD` an. Solange sie fehlen, baut der Workflow eine unsignierte Release-APK
+  und eine Debug-APK. Kein Schlüssel landet im Repository.
 
 ---
 
-## 10. Offene Entscheidungen
+## 10. Entscheidungen
 
-1. **Zielgerät(e):** Welches Handy nutzt du (Hersteller/Modell, Android-Version)? Das bestimmt Akku-Tipps und Modellgröße.
-2. **Stille verwerfen** als Standard – oder lieber wirklich alles speichern?
-3. **Aufbewahrung Audio:** Standard 30 Tage, Transkripte unbegrenzt – passt das?
-4. **Lizenz** des Projekts (z. B. GPL-3.0, MIT oder Apache-2.0)?
-5. **App-Name/Paket:** Vorschlag `open2ndbrain`, Paket `de.danerd.open2ndbrain`.
+| Thema | Entscheidung |
+|---|---|
+| Android-Versionen | alle modernen Versionen: Android 10–16 (minSdk 29, targetSdk 36) |
+| Stille verwerfen | ja, Standard an; Opus 16 kbit/s, Sparmodus 12 kbit/s |
+| Aufbewahrung | Audio 30 Tage (einstellbar), Transkripte unbegrenzt |
+| Lizenz | GNU AGPL-3.0-or-later |
+| Paketname | `de.open2ndbrain` |
+| Auslieferung | nur GitHub (Actions + Releases), kein FTP-Deploy |
