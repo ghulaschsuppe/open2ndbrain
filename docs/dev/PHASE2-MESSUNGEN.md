@@ -85,3 +85,19 @@ Rauschen 8 dB SNR, Opus 16 kbit/s; „+Norm“ = Lautstärke-Normalisierung vor 
 Feste Sprache bzw. einsprachige Modelle sind drastisch robuster. **Standard ab jetzt: FastConformer Deutsch**
 (schnell, Zeitstempel); **Canary** als „genau“-Option (ohne Token-Zeitstempel → Äußerungen über VAD-Abschnitte).
 Lautstärke-Normalisierung hilft Parakeet/Canary leicht, schadet nie → immer an.
+
+## Alle ASR-Modelle in der Kotlin-Pipeline (Integrationstest, Linux-JNI, 4 Threads)
+`SherpaIntegrationTest` mit `O2B_ASR_MODEL=<id>`; conv16.wav (176 s) → conv2_16.wav (137 s) → conv16.wav erneut.
+Lautstärkenormalisierung vor der ASR an; Modelle ohne Token-Zeitstempel (Canary, Whisper) erkennen Einheiten aus
+feinen VAD-Abschnitten desselben Sprechers (≤ 15 s), Wortzeiten werden proportional geschätzt.
+
+| Modell | Sprecher R1 / R2 / R3 | neue Profile R2/R3 | RTF | Text (Eindruck) |
+|---|---|---|---|---|
+| FastConformer Deutsch (CTC) | 100 / 100 / 100 % | keine | 0,03 | sehr gut, Eigennamen gut („Pokrowskoje“) |
+| Canary 180M (de) | 100 / 98 / 100 % | keine | 0,30–0,45 | sehr gut, saubere Satzgrenzen |
+| Parakeet v3 | 99 / 96 / 99 % | keine | 0,15–0,24 | mehr Fehler („Übermorgen vielleicht schnelle tote Leiche“) |
+| Whisper small (de) | 100 / 99 / 100 % | keine | 0,31–0,41 | ordentlich, lässt vereinzelt Abschnitte aus / Fragmente („der“) |
+
+Canary ist in der Pipeline langsamer als im Satz-Benchmark (RTF 0,09), weil kurze Einheiten den festen Decoder-Aufwand
+je Aufruf stärker gewichten. **Lautstärkenormalisierung vor dem Embedding schadet** (FastConformer-Lauf: 2 statt 3 Profile,
+78 %) – sie bleibt nur vor der ASR aktiv (`normalizeForEmbeddings = false`).
