@@ -199,7 +199,7 @@ Danach braucht die App kein Internet mehr. Eigene Modelldateien können auch man
 | Spracherkennung | Parakeet TDT 0.6B v3 int8 (multilingual) | ~650 MB | Whisper small/turbo (mehr Sprachen, langsamer) |
 | Sprachaktivität (VAD) | Silero VAD | 2 MB | – |
 | Semantische Suche (Ph. 4) | multilingual-e5-small (ONNX int8) | ~120 MB | – |
-| Sprecher (Ph. 5) | 3D-Speaker / pyannote-Segmentierung | ~30 MB | – |
+| Sprecher (Ph. 2) | WeSpeaker ResNet34 (Stimmabdruck je Abschnitt) | ~26 MB | 3D-Speaker CAM++, pyannote-Segmentierung |
 | Sprachmodell (Ph. 4) | Qwen3 1.7B oder Gemma 3 1B, GGUF Q4 | 1–1,2 GB | Gemma 3 4B / Qwen3 4B auf starken Geräten (~2,5 GB) |
 
 > Die genaue Geschwindigkeit (Echtzeitfaktor) messen wir in Phase 2 auf deinem Gerät. Erwartung für ein aktuelles
@@ -217,7 +217,7 @@ segments    (id, recording_id, start_ms, end_ms, text, speaker_id?, pinned)
 segments_fts  – FTS4-Volltextindex über segments.text (Umlaut-tolerant, Präfixsuche)
 embeddings  (segment_chunk_id, vector BLOB)            – Phase 4
 day_notes   (date, summary, todos, topics, people)      – Phase 4
-speakers    (id, name, voice_embedding)                 – Phase 5
+speakers    (id, name, voice_embedding)                 – Phase 2 (speakers.json)
 ```
 
 ### 6.2 Suche
@@ -265,10 +265,10 @@ Deshalb bleibt die Suche das Fundament und die KI ist ein Aufsatz.
 | Phase | Inhalt | Ergebnis |
 |---|---|---|
 | **1 – Recorder** | Projektgerüst, Foreground-Service, AudioRecord, stündliche Opus-Dateien, VAD-„Stille verwerfen“, BT-Routing, Benachrichtigung, Kachel, Akku-Einrichtungsassistent, einfache Liste der Aufnahmen mit Player | Zuverlässige 24/7-Aufnahme |
-| **2 – Transkription** | ModelManager (Download/Import), sherpa-onnx-Einbindung, Parakeet v3, Worker-Pipeline, Lade-Einstellung, Benchmark-Anzeige | Automatische Transkripte |
+| **2 – Transkription & Sprecher** | ModelManager (Download/Import), sherpa-onnx-Einbindung, Parakeet v3, Worker-Pipeline, Lade-Einstellung, Benchmark-Anzeige, **Sprechererkennung** (dateiübergreifend, Umbenennen, „Das bin ich“, Zusammenführen) | Automatische Transkripte mit Sprechern |
 | **3 – Index & Suche** | Room + FTS, Zeitleiste, Volltextsuche, Abspielen ab Zeitstempel, Aufbewahrungsregeln, Markdown-Export | Durchsuchbares Second Brain |
 | **4 – Semantik & KI** | Embeddings, hybride Suche, llama.cpp, Tageszusammenfassung, To-dos | „OMI, aber offline“ |
-| **5 – Komfort** | Fragen/Chat mit Quellen, Sprechererkennung & -namen, Verschlüsselung, Widget, Obsidian-Sync-Ordner | Ausbau |
+| **5 – Komfort** | Fragen/Chat mit Quellen, Verschlüsselung, Widget, Obsidian-Sync-Ordner | Ausbau |
 
 **Build & Verteilung**
 Alles läuft über GitHub, **kein FTP-Upload**:
