@@ -8,3 +8,6 @@ build/
 .kotlin/
 *.keystore
 *.jks
+
+# Arbeitskopien der Agenten
+/.claude/worktrees/
