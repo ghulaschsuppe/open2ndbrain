@@ -173,6 +173,11 @@
     <string name="waiting_model_missing">Sprachmodell fehlt</string>
     <string name="waiting_charger">Wartet auf Ladegerät</string>
     <string name="waiting_battery_low">Akku schwach – wartet</string>
+    <string name="waiting_segment">Wartet auf Abschluss des aktuellen Abschnitts (%1$s)</string>
+    <string name="settings_threads_auto">Automatisch (%1$d)</string>
+    <string name="settings_interval">Abschnittslänge für die Transkription</string>
+    <string name="settings_interval_value">%1$d min</string>
+    <string name="settings_interval_default">Standard – Transkript spätestens nach einer Viertelstunde</string>
 
     <!-- Phase 2: Meetings -->
     <string name="action_meeting_start">Meeting starten</string>

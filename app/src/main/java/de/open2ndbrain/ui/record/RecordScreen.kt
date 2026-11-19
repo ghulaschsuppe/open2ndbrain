@@ -156,7 +156,7 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
 
         StatsCard(state)
 
-        TranscriptionCard(transcription)
+        TranscriptionCard(transcription, onTranscribeNow = vm::transcribeNow)
     }
 
     if (showMicDialog) {

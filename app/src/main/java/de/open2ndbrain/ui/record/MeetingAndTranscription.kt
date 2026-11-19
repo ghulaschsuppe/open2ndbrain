@@ -139,7 +139,7 @@ fun TitleDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit
 
 /** Zeile mit dem Transkriptions-Status: läuft x %, n in Warteschlange, Echtzeitfaktor, Wartegrund. */
 @Composable
-fun TranscriptionCard(status: TranscriptionStatus) {
+fun TranscriptionCard(status: TranscriptionStatus, onTranscribeNow: (() -> Unit)? = null) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(stringResource(R.string.transcription_card_title), style = MaterialTheme.typography.titleSmall)
@@ -160,6 +160,9 @@ fun TranscriptionCard(status: TranscriptionStatus) {
                 Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             status.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            if (onTranscribeNow != null && !status.running) {
+                TextButton(onClick = onTranscribeNow) { Text(stringResource(R.string.meeting_transcribe_now)) }
+            }
         }
     }
 }

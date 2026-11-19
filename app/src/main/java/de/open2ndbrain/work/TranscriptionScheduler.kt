@@ -11,6 +11,7 @@ import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -19,7 +20,9 @@ import de.open2ndbrain.O2bApp
 import de.open2ndbrain.R
 import de.open2ndbrain.core.AppContainer
 import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.EngineStatus
 import de.open2ndbrain.core.ModelState
+import de.open2ndbrain.ui.Formatters
 import de.open2ndbrain.settings.AppSettings
 import de.open2ndbrain.settings.TranscriptionMode
 import kotlinx.coroutines.CoroutineScope
@@ -35,12 +38,17 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
 
 /** Ladezustand des Geräts (aus dem ACTION_BATTERY_CHANGED-Sticky-Broadcast). */
-data class BatteryInfo(val charging: Boolean = false, val low: Boolean = false)
+data class BatteryInfo(val charging: Boolean = false, val low: Boolean = false, val percent: Int = 100) {
+    /** Unsere eigene Grenze (< 20 %, nicht ladend) – strenger als das System-„Akku schwach“. */
+    val lowForTranscription: Boolean get() = low || TranscriptionPlanner.batteryLow(percent, charging)
+}
 
 /**
  * Plant die Transkription: beim App-Start, wenn eine Aufnahmedatei abgeschlossen wird, nach Modell-Download,
@@ -75,11 +83,14 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
             }
         }
         // Eine Aufnahmedatei wurde abgeschlossen (aktuelle Datei wechselt) → anstoßen.
+        // Läuft der Dienst, startet sein Runner sofort; sonst (nach kurzer Entprellung) WorkManager.
         scope.launch {
             container.recordingEngine.state.map { it.currentFile }.distinctUntilChanged().drop(1)
                 .debounce(FILE_DEBOUNCE_MS)
                 .collect { schedule() }
         }
+        // Ladegerät/Akku geändert → Dienst-Runner prüft neu.
+        scope.launch { _battery.drop(1).collect { if (container.transcriptionRunner.serviceActive) container.transcriptionRunner.trigger() } }
         // Modelle fertig installiert → anstoßen.
         scope.launch {
             container.modelManager.states.map { modelsReady(it) }.distinctUntilChanged().drop(1).collect { ready ->
@@ -89,13 +100,26 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
         }
         // Wartegrund aktuell halten.
         scope.launch {
-            combine(container.settings.settings, container.modelManager.states, _battery, pendingCount, container.transcriptionStatus.status) {
+            val recording = container.recordingEngine.state.map { it.status == EngineStatus.Recording || it.status == EngineStatus.MicBusy }
+                .distinctUntilChanged()
+            val minuteTicker = flow {
+                while (true) {
+                    emit(System.currentTimeMillis())
+                    delay(30_000)
+                }
+            }
+            val inputs = combine(container.settings.settings, container.modelManager.states, _battery, pendingCount, container.transcriptionStatus.status) {
                     s, models, battery, pending, status ->
-                TranscriptionPlanner.waitingReason(
-                    s.transcriptionMode, modelsReady(models), maxOf(pending, status.pendingCount), status.running, battery.charging, battery.low,
+                Triple(s, modelsReady(models) to battery, maxOf(pending, status.pendingCount) to status.running)
+            }
+            combine(inputs, recording, minuteTicker) { (s, mb, pr), rec, now ->
+                val (ready, battery) = mb
+                val (pending, running) = pr
+                val reason = TranscriptionPlanner.waitingReason(
+                    s.transcriptionMode, ready, pending, running, battery.charging, battery.lowForTranscription, segmentRecording = rec,
                 )
-            }.distinctUntilChanged().collect { reason ->
-                val text = reason?.let { reasonText(it) }
+                reason?.let { reasonText(it, TranscriptionPlanner.nextBoundary(now, s.transcriptionIntervalMin, ZoneId.systemDefault())) }
+            }.distinctUntilChanged().collect { text ->
                 container.transcriptionStatus.update { if (it.waitingReason == text) it else it.copy(waitingReason = text) }
             }
         }
@@ -108,27 +132,51 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
     }
 
     /**
-     * Lauf einreihen. [ignoreCharging] (z. B. „Jetzt transkribieren“ in der Meeting-Ansicht) ignoriert die
-     * Lade-Bedingung einmalig.
+     * Lauf anstoßen. Läuft der Aufnahmedienst, übernimmt sein Runner sofort; sonst WorkManager – expedited ohne
+     * Lade-/Akku-Bedingungen, wenn die Bedingungen gerade erfüllt sind, sonst als normaler Auftrag mit Bedingungen
+     * ([constrained]). [ignoreCharging] („Jetzt transkribieren“) ignoriert „Nur beim Laden“ einmalig.
      */
-    fun schedule(constraintsChanged: Boolean = false, ignoreCharging: Boolean = false) {
+    fun schedule(constraintsChanged: Boolean = false, ignoreCharging: Boolean = false, constrained: Boolean = false) {
+        val runner = container.transcriptionRunner
+        if (runner.serviceActive && !constrained) {
+            if (ignoreCharging) runner.requestForce() else runner.trigger()
+            refreshStatus()
+            return
+        }
         scope.launch {
             try {
                 val s = container.settings.current()
                 if (s.transcriptionMode == TranscriptionMode.Off && !ignoreCharging) return@launch
                 val states = workManager.getWorkInfosForUniqueWorkFlow(UNIQUE_NAME).first().map { it.state }
-                val policy = TranscriptionPlanner.policy(states, constraintsChanged || ignoreCharging)
-                val request = OneTimeWorkRequestBuilder<TranscriptionWorker>()
-                    .setConstraints(constraints(s, ignoreCharging))
+                val policy = TranscriptionPlanner.policy(states, constraintsChanged || ignoreCharging || constrained)
+                val b = _battery.value
+                val canRunNow = TranscriptionPlanner.runDecision(
+                    s.transcriptionMode, modelsReady = true, charging = b.charging, batteryPercent = b.percent, force = ignoreCharging,
+                ) is RunDecision.Run
+                val builder = OneTimeWorkRequestBuilder<TranscriptionWorker>()
                     .setInputData(workDataOf(TranscriptionWorker.KEY_FORCE to ignoreCharging))
                     .addTag(TAG)
-                    .build()
-                workManager.enqueueUniqueWork(UNIQUE_NAME, policy, request)
+                if (canRunNow && !constrained) {
+                    // Expedited erlaubt keine Lade-/Akku-Bedingungen; der Worker prüft sie beim Start selbst.
+                    builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                } else {
+                    builder.setConstraints(constraints(s, ignoreCharging))
+                }
+                workManager.enqueueUniqueWork(UNIQUE_NAME, policy, builder.build())
                 refreshPendingCount()
             } catch (e: Exception) {
                 Log.w(TAG, "Planung fehlgeschlagen", e)
             }
         }
+    }
+
+    /**
+     * „Jetzt transkribieren“: die laufende Datei sofort abschließen (`splitNow`) und die Warteschlange gleich
+     * verarbeiten, „Nur beim Laden“ einmalig ignorieren.
+     */
+    fun transcribeNow() {
+        container.recordingEngine.splitNow("manual")
+        schedule(ignoreCharging = true)
     }
 
     /** Laufende Transkription anhalten (z. B. vom Nutzer). */
@@ -167,12 +215,15 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
     private fun modelsReady(states: Map<String, ModelState>): Boolean =
         states[ModelCatalog.PARAKEET_V3.id] is ModelState.Installed && states[ModelCatalog.SILERO_VAD.id] is ModelState.Installed
 
-    private fun reasonText(r: WaitingReason): String = appContext.getString(
+    private fun reasonText(r: WaitingReason, nextSegmentEnd: Long): String = if (r == WaitingReason.WaitingForSegment) {
+        appContext.getString(R.string.waiting_segment, Formatters.time(nextSegmentEnd))
+    } else appContext.getString(
         when (r) {
             WaitingReason.Off -> R.string.waiting_off
             WaitingReason.ModelMissing -> R.string.waiting_model_missing
             WaitingReason.WaitingForCharger -> R.string.waiting_charger
             WaitingReason.BatteryLow -> R.string.waiting_battery_low
+            WaitingReason.WaitingForSegment -> R.string.waiting_off
         },
     )
 
@@ -189,7 +240,10 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
     private fun updateBattery(intent: Intent) {
         val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
         val low = intent.getBooleanExtra(BatteryManager.EXTRA_BATTERY_LOW, false)
-        val info = BatteryInfo(plugged, low)
+        val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+        val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, 100)
+        val percent = if (level >= 0 && scale > 0) level * 100 / scale else 100
+        val info = BatteryInfo(plugged, low, percent)
         if (_battery.value != info) _battery.value = info
     }
 

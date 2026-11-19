@@ -71,6 +71,8 @@ class RecorderService : LifecycleService() {
     private var configSent: EngineConfig? = null
     private var lastModel = NotificationModel(DisplayStatus.Starting)
     private var wakeLock: PowerManager.WakeLock? = null
+    /** Transkription im Dienst (solange er im Vordergrund läuft). */
+    private val transcription by lazy { ServiceTranscription(container) }
     /** Hält die CPU während einer befristeten Pause wach, damit der Handler pünktlich fortsetzt. */
     private var pauseWakeLock: PowerManager.WakeLock? = null
 
@@ -127,6 +129,7 @@ class RecorderService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        transcription.stop()
         handler.removeCallbacks(autoResumeRunnable)
         if (engineStarted) {
             engine.stop()
@@ -304,6 +307,7 @@ class RecorderService : LifecycleService() {
             ServiceCompat.startForeground(this, RecorderNotifications.ID_RECORDING, notification, foregroundType())
             inForeground = true
             statusHolder.update { it.copy(running = true) }
+            transcription.start(lifecycleScope)
             true
         } catch (e: IllegalStateException) {
             // ForegroundServiceStartNotAllowedException (Android 12+): Start aus dem Hintergrund.
@@ -349,6 +353,7 @@ class RecorderService : LifecycleService() {
     }
 
     private fun finishService(startId: Int?) {
+        transcription.stop()
         cancelAutoResume()
         releasePauseWakeLock()
         if (inForeground) {

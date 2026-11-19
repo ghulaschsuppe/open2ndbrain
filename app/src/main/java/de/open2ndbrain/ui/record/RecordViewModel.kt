@@ -10,6 +10,7 @@ import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MicPreference
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.service.MeetingController
+import de.open2ndbrain.work.TranscriptionRunStat
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderService
 import de.open2ndbrain.service.displayStatus
@@ -132,6 +133,12 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun bookmark() = viewModelScope.launch { container.markers.addBookmark() }
+
+    /** „Jetzt transkribieren“: aktuelle Datei abschließen und sofort verarbeiten („Nur beim Laden“ einmalig ignoriert). */
+    fun transcribeNow() = container.transcriptionScheduler.transcribeNow()
+
+    /** Diagnose: letzte Transkriptionsläufe (Echtzeitfaktor, Ladezeit, Threads, Gerät). */
+    val transcriptionStats: StateFlow<List<TranscriptionRunStat>> = container.transcriptionStats.runs
 
     private fun send(action: String) {
         RecorderService.send(getApplication(), action)

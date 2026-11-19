@@ -3,32 +3,16 @@ package de.open2ndbrain.work
 import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import de.open2ndbrain.O2bApp
 import de.open2ndbrain.R
-import de.open2ndbrain.core.ModelCatalog
-import de.open2ndbrain.core.ModelLoadException
-import de.open2ndbrain.core.RecordingFile
-import de.open2ndbrain.core.Transcriber
-import de.open2ndbrain.core.TranscriberConfig
-import de.open2ndbrain.markers.MarkerLogic
-import de.open2ndbrain.settings.TranscriptionMode
-import de.open2ndbrain.transcription.SherpaTranscriber
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runInterruptible
-import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Arbeitet die Warteschlange `transcripts.pending()` nacheinander ab (Meeting-Dateien zuerst). Die Modelle werden
- * nur geladen, wenn es etwas zu tun gibt, und am Ende immer freigegeben. Abbruch (Bedingungen weg, Nutzer, Timeout)
- * unterbricht den Rechen-Thread; dann wird kein halbes Transkript geschrieben.
+ * Rückfallebene, wenn der Aufnahmedienst nicht läuft: arbeitet die Warteschlange über den gemeinsamen
+ * [TranscriptionRunner] ab (gleiche Logik wie im Dienst, nie zwei Läufe gleichzeitig). Läuft der Dienst-Runner,
+ * übernimmt dieser – der Worker endet dann sofort.
  */
 class TranscriptionWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
@@ -36,115 +20,51 @@ class TranscriptionWorker(context: Context, params: WorkerParameters) : Coroutin
 
     override suspend fun doWork(): Result {
         val c = container
-        val status = c.transcriptionStatus
-        val settings = c.settings.current()
+        val runner = c.transcriptionRunner
+        if (runner.serviceActive) {
+            runner.trigger()
+            return Result.success()
+        }
         val force = inputData.getBoolean(KEY_FORCE, false)
-        if (settings.transcriptionMode == TranscriptionMode.Off && !force) return Result.success()
-
-        val asrDir = c.modelManager.installedDir(ModelCatalog.PARAKEET_V3.id)
-        val vadFile = c.modelManager.installedFile(ModelCatalog.SILERO_VAD)
-        if (asrDir == null || vadFile == null) {
+        val s = c.settings.current()
+        val battery = c.transcriptionScheduler.battery.value
+        val decision = TranscriptionPlanner.runDecision(
+            s.transcriptionMode, modelsReady = true, charging = battery.charging, batteryPercent = battery.percent, force = force,
+        )
+        if (decision is RunDecision.Wait) {
+            // Expedited-Aufträge haben keine Lade-/Akku-Bedingungen: dann mit Bedingungen neu einreihen.
+            if (decision.reason == WaitingReason.WaitingForCharger || decision.reason == WaitingReason.BatteryLow) {
+                c.transcriptionScheduler.schedule(constrained = true)
+            }
             c.transcriptionScheduler.refreshStatus()
             return Result.success()
         }
-        val speakerFile = if (settings.speakerRecognition) c.modelManager.installedFile(ModelCatalog.WESPEAKER_RESNET34) else null
-        val config = TranscriberConfig(asrDir, vadFile, speakerFile, settings.transcriptionThreads)
-
-        // Einträge für inzwischen gelöschte Audiodateien entfernen.
-        withContext(Dispatchers.IO) { c.transcriptionFailures.pruneMissing() }
-        var transcriber: Transcriber? = null
-        try {
-            while (!isStopped) {
-                val next = nextPending() ?: break
-                val (rec, remaining) = next
-                status.update { it.copy(running = true, currentFile = rec.audio.name, progress = 0f, pendingCount = remaining, waitingReason = null) }
-                updateNotification(rec.audio.name, 0f, remaining)
-                val t = transcriber ?: SherpaTranscriber(applicationContext, config, c.speakers).also { transcriber = it }
-                try {
-                    val transcript = transcribeWithProgress(t, rec, remaining)
-                    c.transcriptionFailures.clear(rec.audio)
-                    status.update {
-                        it.copy(
-                            lastRealTimeFactor = TranscriptionPlanner.realTimeFactor(transcript.processingMs, transcript.audioDurationMs)
-                                ?: it.lastRealTimeFactor,
-                            lastError = null,
-                        )
-                    }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: InterruptedException) {
-                    throw CancellationException("unterbrochen")
-                } catch (e: ModelLoadException) {
-                    // Nur dieser Fehler bedeutet „Modell defekt/fehlt“ → ganzen Lauf beenden, Datei nicht zählen.
-                    Log.e(TAG, "Modell nicht ladbar", e)
-                    status.update { it.copy(lastError = applicationContext.getString(R.string.transcription_model_broken)) }
-                    break
-                } catch (e: IOException) {
-                    Log.w(TAG, "Transkription von ${rec.audio.name} fehlgeschlagen", e)
-                    recordFailure(rec)
-                    status.update { it.copy(lastError = e.message) }
-                } catch (e: OutOfMemoryError) {
-                    Log.e(TAG, "Zu wenig Arbeitsspeicher", e)
-                    status.update { it.copy(lastError = applicationContext.getString(R.string.transcription_oom)) }
-                    break
-                } catch (e: Exception) {
-                    // u. a. IllegalStateException: Fehler dieser Datei, nicht des Modells.
-                    Log.w(TAG, "Transkription von ${rec.audio.name} fehlgeschlagen", e)
-                    recordFailure(rec)
-                    status.update { it.copy(lastError = e.message ?: e.javaClass.simpleName) }
-                }
-            }
-        } finally {
-            transcriber?.let { t -> runCatching { withContext(Dispatchers.Default) { t.close() } } }
-            status.update { it.copy(running = false, currentFile = null, progress = 0f) }
+        val result = runner.run(
+            TranscriptionRunner.Origin.Worker,
+            canContinue = { !isStopped && !runner.serviceActive },
+            onProgress = { file, p, remaining -> updateNotification(file, p, remaining) },
+        )
+        if (result is TranscriptionRunner.Result.ModelMissing || result is TranscriptionRunner.Result.Done) {
             c.transcriptionScheduler.refreshStatus()
         }
         return Result.success()
     }
 
-    /** Fehlversuch zählen – außer die Datei wurde inzwischen gelöscht (dann gibt es nichts mehr zu wiederholen). */
-    private fun recordFailure(rec: RecordingFile) {
-        val failures = container.transcriptionFailures
-        if (rec.audio.exists()) failures.increment(rec.audio) else failures.clear(rec.audio)
-    }
+    /** Für Expedited-Aufträge unter Android 11 und älter nötig. */
+    override suspend fun getForegroundInfo(): ForegroundInfo = WorkNotifications.transcriptionForegroundInfo(notification(null, 0f, 0))
 
-    /** Nächste Datei (Meetings zuerst, dauerhaft fehlerhafte übersprungen) und Anzahl insgesamt offener Dateien. */
-    private suspend fun nextPending(): Pair<RecordingFile, Int>? {
-        val c = container
-        val pending = withContext(Dispatchers.IO) { c.transcripts.pending() }
-            .filterNot { c.transcriptionFailures.isBlocked(it.audio) }
-        val ordered = MarkerLogic.prioritize(pending, c.markers.current(), System.currentTimeMillis())
-        return ordered.firstOrNull()?.let { it to ordered.size }
-    }
-
-    private suspend fun transcribeWithProgress(t: Transcriber, rec: RecordingFile, remaining: Int) = coroutineScope {
-        val progress = AtomicReference(0f)
-        val reporter = launch {
-            while (true) {
-                delay(PROGRESS_INTERVAL_MS)
-                val p = progress.get()
-                container.transcriptionStatus.update { it.copy(progress = p) }
-                updateNotification(rec.audio.name, p, remaining)
-            }
-        }
-        try {
-            runInterruptible(Dispatchers.Default) { t.transcribe(rec) { p -> progress.set(p) } }
-        } finally {
-            reporter.cancel()
-        }
-    }
+    private fun notification(fileName: String?, progress: Float, remaining: Int) = WorkNotifications.progressNotification(
+        applicationContext,
+        WorkNotifications.CHANNEL_TRANSCRIPTION,
+        applicationContext.getString(R.string.transcription_notif_title),
+        if (fileName == null) "" else applicationContext.resources.getQuantityString(R.plurals.transcription_notif_text, remaining, fileName, remaining),
+        if (fileName == null) null else progress,
+        WorkManager.getInstance(applicationContext).createCancelPendingIntent(id),
+    )
 
     private suspend fun updateNotification(fileName: String, progress: Float, remaining: Int) {
-        val n = WorkNotifications.progressNotification(
-            applicationContext,
-            WorkNotifications.CHANNEL_TRANSCRIPTION,
-            applicationContext.getString(R.string.transcription_notif_title),
-            applicationContext.resources.getQuantityString(R.plurals.transcription_notif_text, remaining, fileName, remaining),
-            progress,
-            WorkManager.getInstance(applicationContext).createCancelPendingIntent(id),
-        )
         try {
-            setForeground(WorkNotifications.transcriptionForegroundInfo(n))
+            setForeground(WorkNotifications.transcriptionForegroundInfo(notification(fileName, progress, remaining)))
         } catch (e: IllegalStateException) {
             // Vordergrundstart aus dem Hintergrund nicht erlaubt (Android 12+, ohne Akku-Ausnahme): normal weiter.
             Log.d(TAG, "setForeground nicht möglich: ${e.message}")
@@ -154,6 +74,5 @@ class TranscriptionWorker(context: Context, params: WorkerParameters) : Coroutin
     companion object {
         const val KEY_FORCE = "force"
         private const val TAG = "TranscriptionWorker"
-        private const val PROGRESS_INTERVAL_MS = 1_000L
     }
 }

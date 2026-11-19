@@ -159,9 +159,23 @@ private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (Set
             AppSettings.THREAD_OPTIONS.forEach { n ->
                 RadioRow(
                     selected = s.transcriptionThreads == n,
-                    title = pluralStringResource(R.plurals.settings_threads_value, n, n),
-                    subtitle = stringResource(if (n == AppSettings.DEFAULT_THREADS) R.string.settings_threads_fast else R.string.settings_threads_saver),
+                    title = if (n == AppSettings.THREADS_AUTO) {
+                        stringResource(R.string.settings_threads_auto, s.copy(transcriptionThreads = n).effectiveThreads())
+                    } else {
+                        pluralStringResource(R.plurals.settings_threads_value, n, n)
+                    },
+                    subtitle = stringResource(if (n == AppSettings.THREADS_AUTO) R.string.settings_threads_fast else R.string.settings_threads_saver),
                     onClick = { vm.setThreads(n) },
+                )
+            }
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            Label(stringResource(R.string.settings_interval))
+            AppSettings.INTERVAL_OPTIONS.forEach { m ->
+                RadioRow(
+                    selected = s.transcriptionIntervalMin == m,
+                    title = stringResource(R.string.settings_interval_value, m),
+                    subtitle = if (m == AppSettings.DEFAULT_INTERVAL_MIN) stringResource(R.string.settings_interval_default) else null,
+                    onClick = { vm.setInterval(m) },
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
