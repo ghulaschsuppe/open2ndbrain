@@ -3,6 +3,7 @@ package de.open2ndbrain.core
 import android.content.Context
 import de.open2ndbrain.audio.AudioRecordingEngine
 import de.open2ndbrain.audio.FileRecordingRepository
+import de.open2ndbrain.service.RecorderStatusHolder
 import de.open2ndbrain.settings.SettingsRepository
 import java.io.File
 
@@ -17,4 +18,7 @@ class AppContainer(context: Context) {
     val recordingEngine: RecordingEngine by lazy { AudioRecordingEngine(appContext) }
 
     val recordings: RecordingRepository by lazy { FileRecordingRepository(audioRoot) }
+
+    /** Zustand des Aufnahmedienstes (läuft/pausiert) für UI und Kachel. */
+    val recorderStatus: RecorderStatusHolder by lazy { RecorderStatusHolder() }
 }
