@@ -27,6 +27,13 @@ interface RecordingEngine {
     /** Beendet die Aufnahme, schließt Dateien sauber ab, gibt alle Ressourcen frei. */
     fun stop()
 
+    /**
+     * Schließt die laufende Datei sofort ab und beginnt nahtlos eine neue Teildatei derselben Stunde
+     * (z. B. bei Meeting-Ende, damit das Meeting gleich transkribiert werden kann). Sidecar-Ereignis `split` mit [reason].
+     * No-op, wenn nicht aufgenommen wird.
+     */
+    fun splitNow(reason: String) {}
+
     /** Übernimmt geänderte Einstellungen im laufenden Betrieb (Bitrate wirkt ab der nächsten Datei). */
     fun updateConfig(config: EngineConfig)
 }
