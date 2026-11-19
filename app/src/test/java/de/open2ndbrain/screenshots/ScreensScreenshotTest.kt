@@ -1,0 +1,152 @@
+package de.open2ndbrain.screenshots
+
+import android.app.Application
+import androidx.compose.runtime.Composable
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.ModelState
+import de.open2ndbrain.core.TranscriptionStatus
+import de.open2ndbrain.settings.AppSettings
+import de.open2ndbrain.ui.settings.ModelRow
+import de.open2ndbrain.ui.settings.SettingDivider
+import de.open2ndbrain.ui.settings.SettingsActions
+import de.open2ndbrain.ui.settings.SettingsContent
+import java.io.File
+import de.open2ndbrain.ui.onboarding.OnboardingScreen
+import de.open2ndbrain.ui.record.RecordActions
+import de.open2ndbrain.ui.record.RecordContent
+import de.open2ndbrain.ui.record.RecordSamples
+import de.open2ndbrain.ui.recordings.MeetingDetailContent
+import de.open2ndbrain.ui.recordings.PlayerState
+import de.open2ndbrain.ui.recordings.RecordingDetailContent
+import de.open2ndbrain.ui.recordings.RecordingsData
+import de.open2ndbrain.ui.recordings.TimelineActions
+import de.open2ndbrain.ui.recordings.TimelineContent
+import de.open2ndbrain.ui.speakers.SpeakersContent
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/**
+ * Screenshots der Hauptbildschirme mit Beispieldaten (nur mit O2B_SCREENSHOTS=1, siehe app/build.gradle.kts).
+ * Ergebnis: docs/screenshots/<name>-hell.png / -dunkel.png
+ */
+@RunWith(RobolectricTestRunner::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [35], qualifiers = "w400dp-h880dp-xhdpi", application = Application::class)
+class ScreensScreenshotTest {
+    @get:Rule
+    val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Composable
+    private fun Now() = RecordContent(RecordSamples.recording, RecordSamples.meeting, RecordSamples.transcribing, null, RecordActions())
+
+    @Test fun jetztDunkel() = compose.snapshot("1-jetzt", dark = true) { Now() }
+
+    @Test fun jetztHell() = compose.snapshot("1-jetzt", dark = false) { Now() }
+
+    @Test fun jetztAusHell() = compose.snapshot("1-jetzt-aus", dark = false) {
+        RecordContent(RecordSamples.off, null, TranscriptionStatus(), null, RecordActions(onTranscribeNow = {}))
+    }
+
+    @Composable
+    private fun Timeline(data: RecordingsData = SampleData.data) = TimelineContent(
+        data = data,
+        player = PlayerState(file = SampleData.h14.audio, prepared = true, playing = true, positionMs = 754_000, durationMs = SampleData.h14.durationMs),
+        status = RecordSamples.transcribing.copy(currentFile = SampleData.h13.audio.name),
+        speakers = SampleData.directory,
+        today = SampleData.today,
+        actions = TimelineActions(),
+        preview = { rec, _ -> SampleData.previews[rec.audio.path] },
+    )
+
+    @Test fun zeitleisteDunkel() = compose.snapshot("2-zeitleiste", dark = true) { Timeline() }
+
+    @Test fun zeitleisteHell() = compose.snapshot("2-zeitleiste", dark = false) { Timeline() }
+
+    @Test fun zeitleisteLeer() = compose.snapshot("2-zeitleiste-leer", dark = true) {
+        Timeline(RecordingsData(emptyList(), emptyMap(), emptyMap(), emptySet(), emptyMap()))
+    }
+
+    @Composable
+    private fun Detail() = RecordingDetailContent(
+        recording = SampleData.h14,
+        transcript = SampleData.transcript,
+        hint = null,
+        audioExists = true,
+        speakers = SampleData.directory,
+        bookmarks = listOf(SampleData.bookmark),
+        player = PlayerState(file = SampleData.h14.audio, prepared = true, playing = true, positionMs = 313_000, durationMs = SampleData.h14.durationMs),
+        onBack = {},
+        onPlayLine = {},
+        onToggle = {},
+        onSeek = {},
+        onBookmarkClick = {},
+    )
+
+    @Test fun transkriptDunkel() = compose.snapshot("3-transkript", dark = true) { Detail() }
+
+    @Test fun transkriptHell() = compose.snapshot("3-transkript", dark = false) { Detail() }
+
+    @Composable
+    private fun Meeting() = MeetingDetailContent(
+        meeting = SampleData.meeting,
+        lines = SampleData.meetingLines,
+        speakers = SampleData.directory,
+        bookmarks = listOf(SampleData.bookmark),
+        player = PlayerState(),
+        pendingFiles = 1,
+        onTranscribeNow = {},
+        onBack = {},
+        onEdit = {},
+        onPlayLine = {},
+        onToggle = {},
+        onSeek = {},
+        onClosePlayer = {},
+    )
+
+    @Test fun meetingDunkel() = compose.snapshot("4-meeting", dark = true) { Meeting() }
+
+    @Test fun meetingHell() = compose.snapshot("4-meeting", dark = false) { Meeting() }
+
+    @Test fun sprecherDunkel() = compose.snapshot("5-sprecher", dark = true) {
+        SpeakersContent(SampleData.speakers, onSelect = {}, initiallyShowRare = true)
+    }
+
+    @Test fun sprecherHell() = compose.snapshot("5-sprecher", dark = false) {
+        SpeakersContent(SampleData.speakers, onSelect = {}, initiallyShowRare = true)
+    }
+
+    @Test fun sprecherLeer() = compose.snapshot("5-sprecher-leer", dark = false) {
+        SpeakersContent(emptyList(), onSelect = {})
+    }
+
+    @Composable
+    private fun Settings() = SettingsContent(
+        settings = AppSettings(),
+        speakerModelInstalled = true,
+        batteryIgnored = false,
+        dynamicColor = false,
+        actions = SettingsActions(),
+        models = {
+            ModelRow(ModelCatalog.PARAKEET_V3, ModelState.Installed(File("/x")), 0, false, {}, {}, {})
+            SettingDivider()
+            ModelRow(ModelCatalog.WESPEAKER_RESNET34, ModelState.Downloading(19_000_000, 26_500_000), 0, false, {}, {}, {})
+        },
+    )
+
+    @Config(qualifiers = "w400dp-h2400dp-xhdpi")
+    @Test fun einstellungenDunkel() = compose.snapshot("6-einstellungen", dark = true) { Settings() }
+
+    @Config(qualifiers = "w400dp-h2400dp-xhdpi")
+    @Test fun einstellungenHell() = compose.snapshot("6-einstellungen", dark = false) { Settings() }
+
+    @Test fun einrichtungDunkel() = compose.snapshot("7-einrichtung", dark = true) { OnboardingScreen(onFinished = {}) }
+
+    @Test fun einrichtungHell() = compose.snapshot("7-einrichtung", dark = false) { OnboardingScreen(onFinished = {}) }
+
+}

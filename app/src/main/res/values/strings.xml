@@ -70,7 +70,7 @@
     <string name="mic_pref_builtin">Immer intern</string>
 
     <!-- Aufnahmen-Tab -->
-    <string name="recordings_empty">Noch keine Aufnahmen. Starte die Aufnahme im Tab „Aufnahme“.</string>
+    <string name="recordings_empty">Noch keine Aufnahmen. Starte die Aufnahme im Tab „Jetzt“.</string>
     <string name="recordings_part">Teil %1$d</string>
     <string name="recordings_running">läuft</string>
     <string name="recordings_delete_title">Aufnahme löschen?</string>
@@ -97,7 +97,7 @@
     <string name="settings_mic_auto_desc">Bluetooth- oder kabelgebundenes Headset, sonst das eingebaute Mikrofon</string>
     <string name="settings_mic_builtin_desc">Kein Bluetooth-Mikrofon, Musik über Kopfhörer bleibt in voller Qualität</string>
     <string name="settings_mic_specific_desc">Dieses Gerät, sobald es verbunden ist</string>
-    <string name="settings_mic_specific_hint">Ein bestimmtes Gerät wählst du im Tab „Aufnahme“, während es verbunden ist.</string>
+    <string name="settings_mic_specific_hint">Ein bestimmtes Gerät wählst du im Tab „Jetzt“, während es verbunden ist.</string>
     <string name="settings_retention">Audio aufbewahren</string>
     <plurals name="settings_retention_days">
         <item quantity="one">%1$d Tag</item>
@@ -309,4 +309,64 @@
     <string name="licenses_model_entry">Lizenz: %1$s
 Namensnennung: %2$s</string>
     <string name="licenses_models_hint">Die Modelle sind nicht Teil der App; sie werden vom Nutzer geladen oder importiert.</string>
+
+    <!-- Design: Navigation und „Jetzt“ -->
+    <string name="tab_now">Jetzt</string>
+    <string name="tab_timeline">Zeitleiste</string>
+    <string name="tab_speakers">Sprecher</string>
+    <string name="now_title">Jetzt</string>
+    <string name="record_listening">Hört zu</string>
+    <string name="record_idle_chip">Bereit</string>
+    <string name="record_mic_chip_desc">Mikrofon: %1$s. Antippen, um ein anderes zu wählen.</string>
+    <string name="stat_spoken_today">Sprache heute</string>
+    <string name="meeting_end_short">Beenden</string>
+    <string name="stat_recordings">Aufnahmen</string>
+    <string name="stat_free">frei</string>
+    <string name="stat_free_low">frei – wenig Platz</string>
+    <string name="meeting_card_title">Meeting oder wichtiger Moment?</string>
+    <string name="meeting_card_hint">Meetings werden bevorzugt transkribiert. „Merken“ markiert die letzten 30 Sekunden.</string>
+
+    <!-- Design: Zeitleiste, Transkript, Player -->
+    <string name="timeline_title">Zeitleiste</string>
+    <string name="timeline_subtitle">%1$s gespeicherte Sprache</string>
+    <string name="timeline_empty_title">Dein Notizbuch ist noch leer</string>
+    <string name="timeline_empty_text">Sobald die Aufnahme läuft, erscheinen hier deine Stunden – mit Transkript, Sprechern und Meetings.</string>
+    <string name="timeline_empty_action">Aufnahme starten</string>
+    <string name="bookmark_count">%1$d Lesezeichen</string>
+    <plurals name="speakers_count">
+        <item quantity="one">%1$d Stimme</item>
+        <item quantity="other">%1$d Stimmen</item>
+    </plurals>
+    <string name="transcript_empty_title">Noch nichts zu lesen</string>
+    <string name="transcript_playing">wird gerade abgespielt</string>
+    <string name="player_back_15">15 Sekunden zurück</string>
+    <string name="player_forward_15">15 Sekunden vor</string>
+    <string name="player_this_recording">Diese Aufnahme</string>
+
+    <!-- Design: Sprecher -->
+    <string name="speakers_empty_title">Noch keine Stimmen erkannt</string>
+    <string name="speaker_last_seen">zuletzt gehört %1$s</string>
+
+    <!-- Design: Einstellungen -->
+    <string name="settings_subtitle">Alles bleibt auf diesem Gerät.</string>
+    <string name="settings_bitrate_desc">Höhere Qualität braucht etwas mehr Speicher.</string>
+    <string name="settings_section_appearance">Darstellung</string>
+    <string name="settings_dynamic_color">Systemfarben verwenden</string>
+    <string name="settings_dynamic_color_desc">Farben aus deinem Hintergrundbild statt der open2ndbrain-Palette (Material You).</string>
+    <string name="settings_privacy_title">Datenschutz</string>
+    <string name="settings_legal_title">Rechtlicher Hinweis</string>
+    <string name="models_required">erforderlich</string>
+    <string name="models_optional">optional</string>
+    <string name="licenses_fonts_title">Schriften</string>
+    <string name="licenses_fonts">Inter (The Inter Project Authors) und Manrope (The Manrope Project Authors): SIL Open Font License 1.1</string>
+    <string name="licenses_show_text">Lizenztext anzeigen</string>
+    <string name="licenses_hide_text">Lizenztext ausblenden</string>
+
+    <!-- Design: Einrichtung -->
+    <string name="onb_progress">Schritt %1$d von %2$d</string>
+    <string name="onb_welcome_title">Ein Notizbuch, das zuhört</string>
+    <string name="onb_welcome_text">open2ndbrain nimmt auf, was gesprochen wird, schreibt es auf dem Gerät mit und erkennt, wer spricht – dein privates Gedächtnis.</string>
+    <string name="onb_pill_offline">Offline</string>
+    <string name="onb_pill_no_account">Kein Konto</string>
+    <string name="onb_pill_on_device">Bleibt auf dem Gerät</string>
 </resources>

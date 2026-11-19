@@ -3,25 +3,26 @@ package de.open2ndbrain.ui.record
 import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
@@ -29,20 +30,21 @@ import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.Smartphone
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -52,26 +54,46 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.open2ndbrain.R
 import de.open2ndbrain.core.AudioInputInfo
+import de.open2ndbrain.core.EngineState
+import de.open2ndbrain.core.EngineStatus
 import de.open2ndbrain.core.InputType
+import de.open2ndbrain.core.Marker
+import de.open2ndbrain.core.MarkerType
 import de.open2ndbrain.core.MicPreference
+import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderNotifications
 import de.open2ndbrain.service.isStorageFull
 import de.open2ndbrain.ui.Formatters
 import de.open2ndbrain.ui.SystemSettings
+import de.open2ndbrain.ui.components.ChipRow
+import de.open2ndbrain.ui.components.ContentWidth
+import de.open2ndbrain.ui.components.StatusDot
+import de.open2ndbrain.ui.components.O2bCard
+import de.open2ndbrain.ui.components.Pill
+import de.open2ndbrain.ui.components.ScreenTitle
+import de.open2ndbrain.ui.components.StatTile
+import de.open2ndbrain.ui.theme.O2bTheme
+import de.open2ndbrain.ui.theme.Spacing
+import de.open2ndbrain.ui.theme.tabular
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 @Composable
 fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel()) {
@@ -90,74 +112,35 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
         if (granted) tryStart() else problem = R.string.record_mic_denied
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        StatusHeader(state)
+    fun startWithPermission() {
+        if (SystemSettings.hasMic(context)) tryStart() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
-        BigRecordButton(
-            running = state.serviceRunning,
-            onClick = {
-                if (state.serviceRunning) {
-                    vm.stop()
-                } else if (SystemSettings.hasMic(context)) {
-                    tryStart()
-                } else {
-                    micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-            },
-        )
-
-        if (state.serviceRunning) {
-            PauseControls(state, onPause = vm::pause, onPauseShort = vm::pauseShort, onResume = vm::resume)
-        }
-
-        MeetingCard(
-            meeting = meeting,
-            now = state.now,
-            onStart = {
+    RecordContent(
+        state = state,
+        meeting = meeting,
+        transcription = transcription,
+        problem = problem,
+        modifier = modifier,
+        actions = RecordActions(
+            onToggle = { if (state.serviceRunning) vm.stop() else startWithPermission() },
+            onPause = vm::pause,
+            onPauseShort = vm::pauseShort,
+            onResume = vm::resume,
+            onChooseMic = { showMicDialog = true },
+            onStartMeeting = {
                 vm.startMeeting()
                 // Läuft keine Aufnahme oder ist sie pausiert: (fort)setzen – Start aus der sichtbaren App ist erlaubt.
-                if (!state.serviceRunning || state.status == DisplayStatus.Paused) {
-                    if (SystemSettings.hasMic(context)) tryStart() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
+                if (!state.serviceRunning || state.status == DisplayStatus.Paused) startWithPermission()
             },
-            onEnd = vm::endMeeting,
-            onRename = vm::setMeetingTitle,
-            onBookmark = vm::bookmark,
-            bookmarkEnabled = state.serviceRunning && state.status != DisplayStatus.Paused,
-        )
-
-        problem?.let { msg ->
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(stringResource(msg), color = MaterialTheme.colorScheme.onErrorContainer)
-                    if (msg == R.string.record_mic_denied) {
-                        TextButton(onClick = { SystemSettings.openAppDetails(context) }) {
-                            Text(stringResource(R.string.open_app_settings))
-                        }
-                    }
-                }
-            }
-        }
-
-        LevelCard(level = state.engine.level, speech = state.engine.speechActive, active = state.status == DisplayStatus.Recording)
-
-        MicCard(
-            current = state.engine.currentInput,
-            preference = state.micPreference,
-            onChoose = { showMicDialog = true },
-        )
-
-        StatsCard(state)
-
-        TranscriptionCard(transcription)
-    }
+            onEndMeeting = { vm.endMeeting() },
+            onRenameMeeting = { vm.setMeetingTitle(it) },
+            onBookmark = { vm.bookmark() },
+            onOpenAppSettings = { SystemSettings.openAppDetails(context) },
+            // Wird vom App-Agenten verdrahtet, sobald RecordViewModel „Jetzt transkribieren“ anbietet.
+            onTranscribeNow = null,
+        ),
+    )
 
     if (showMicDialog) {
         MicDialog(
@@ -172,8 +155,72 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
     }
 }
 
+/** Alle Aktionen des „Jetzt“-Tabs (zustandslos, für Previews und Screenshots). */
+class RecordActions(
+    val onToggle: () -> Unit = {},
+    val onPause: () -> Unit = {},
+    val onPauseShort: () -> Unit = {},
+    val onResume: () -> Unit = {},
+    val onChooseMic: () -> Unit = {},
+    val onStartMeeting: () -> Unit = {},
+    val onEndMeeting: () -> Unit = {},
+    val onRenameMeeting: (String) -> Unit = {},
+    val onBookmark: () -> Unit = {},
+    val onOpenAppSettings: () -> Unit = {},
+    val onTranscribeNow: (() -> Unit)? = null,
+)
+
+/** „Jetzt“: Aufnahme-Knopf als Hero, Status- und Mikrofon-Chip, Kennzahlen, Meeting/Merken, Transkription. */
 @Composable
-private fun StatusHeader(state: RecordUiState) {
+fun RecordContent(
+    state: RecordUiState,
+    meeting: Marker?,
+    transcription: TranscriptionStatus,
+    problem: Int?,
+    actions: RecordActions,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        ContentWidth {
+            Column {
+                ScreenTitle(
+                    title = stringResource(R.string.now_title),
+                    subtitle = remember(state.now / 60_000) { todayLabel() },
+                )
+                Column(
+                    Modifier.padding(horizontal = Spacing.screen).padding(bottom = Spacing.lg),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.md),
+                ) {
+                    HeroSection(state, actions)
+
+                    AnimatedVisibility(visible = problem != null) {
+                        problem?.let { ProblemCard(it, actions.onOpenAppSettings) }
+                    }
+
+                    MeetingCard(
+                        meeting = meeting,
+                        now = state.now,
+                        onStart = actions.onStartMeeting,
+                        onEnd = actions.onEndMeeting,
+                        onRename = actions.onRenameMeeting,
+                        onBookmark = actions.onBookmark,
+                        bookmarkEnabled = state.serviceRunning && state.status != DisplayStatus.Paused,
+                    )
+
+                    StatsRow(state)
+
+                    TranscriptionCard(transcription, onTranscribeNow = actions.onTranscribeNow)
+                }
+            }
+        }
+    }
+}
+
+private val DAY_FORMAT = DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN)
+private fun todayLabel(): String = DAY_FORMAT.format(LocalDate.now())
+
+@Composable
+private fun HeroSection(state: RecordUiState, actions: RecordActions) {
     val context = LocalContext.current
     val title = when (state.status) {
         DisplayStatus.Off -> stringResource(R.string.status_off)
@@ -199,64 +246,99 @@ private fun StatusHeader(state: RecordUiState) {
         DisplayStatus.Off -> stringResource(R.string.record_off_hint)
         else -> null
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        RecordOrb(
+            status = state.status,
+            running = state.serviceRunning,
+            level = state.engine.level,
+            speech = state.engine.speechActive,
+            onClick = actions.onToggle,
+        )
+        Spacer(Modifier.height(Spacing.xs))
+        AnimatedContent(
+            targetState = title,
+            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            label = "statusTitle",
+        ) { t ->
+            Text(
+                t,
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
         if (subtitle != null) {
-            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium.tabular(),
+                color = if (state.status == DisplayStatus.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = Spacing.xxs, start = Spacing.md, end = Spacing.md),
+            )
+        }
+        Spacer(Modifier.height(Spacing.md))
+        ChipRow(Modifier.fillMaxWidth()) {
+            SpeechPill(state)
+            MicPill(state.engine.currentInput, state.micPreference, actions.onChooseMic)
+        }
+        if (state.serviceRunning) {
+            Spacer(Modifier.height(Spacing.md))
+            PauseControls(state, actions)
         }
     }
 }
 
+/** Chip „Sprache erkannt / Still“ während der Aufnahme, sonst der Zustand in einem Wort. */
 @Composable
-private fun BigRecordButton(running: Boolean, onClick: () -> Unit) {
-    val container by animateColorAsState(
-        if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-        label = "recordButtonColor",
+private fun SpeechPill(state: RecordUiState) {
+    val extra = O2bTheme.extra
+    val recording = state.status == DisplayStatus.Recording
+    val speech = recording && state.engine.speechActive
+    val (text, dot) = when {
+        speech -> stringResource(R.string.record_speech_detected) to MaterialTheme.colorScheme.primary
+        recording -> stringResource(R.string.record_listening) to extra.live
+        state.status == DisplayStatus.Paused -> stringResource(R.string.status_paused) to MaterialTheme.colorScheme.secondary
+        state.status == DisplayStatus.MicBusy -> stringResource(R.string.tile_mic_busy) to extra.meeting
+        state.status == DisplayStatus.Error -> stringResource(R.string.status_error) to MaterialTheme.colorScheme.error
+        else -> stringResource(R.string.record_idle_chip) to MaterialTheme.colorScheme.outline
+    }
+    Pill(
+        text = text,
+        leading = { StatusDot(dot, pulsing = recording) },
     )
-    val content = if (running) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onPrimary
-    val label = stringResource(if (running) R.string.record_stop else R.string.record_start)
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Surface(
-            onClick = onClick,
-            shape = CircleShape,
-            color = container,
-            contentColor = content,
-            shadowElevation = 6.dp,
-            modifier = Modifier
-                .size(176.dp)
-                .semantics { contentDescription = label },
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    if (running) Icons.Filled.Stop else Icons.Filled.Mic,
-                    contentDescription = null,
-                    modifier = Modifier.size(80.dp),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(label, style = MaterialTheme.typography.titleMedium)
-    }
 }
 
 @Composable
-private fun PauseControls(state: RecordUiState, onPause: () -> Unit, onPauseShort: () -> Unit, onResume: () -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun MicPill(current: AudioInputInfo?, preference: MicPreference, onClick: () -> Unit) {
+    val label = current?.name ?: preferenceLabel(preference)
+    val description = stringResource(R.string.record_mic_chip_desc, label)
+    Pill(
+        text = label,
+        icon = current?.type?.let(::iconFor) ?: Icons.Filled.Mic,
+        onClick = onClick,
+        modifier = Modifier.semantics { this.contentDescription = description },
+    )
+}
+
+@Composable
+private fun PauseControls(state: RecordUiState, actions: RecordActions) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm, Alignment.CenterHorizontally), modifier = Modifier.fillMaxWidth()) {
         if (state.status == DisplayStatus.Paused) {
-            Button(onClick = onResume) {
+            Button(onClick = actions.onResume, modifier = Modifier.heightIn(min = 48.dp)) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.xs))
                 Text(stringResource(R.string.action_resume))
             }
         } else {
-            OutlinedButton(onClick = onPause) {
+            FilledTonalButton(onClick = actions.onPause, modifier = Modifier.heightIn(min = 48.dp)) {
                 Icon(Icons.Filled.Pause, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.xs))
                 Text(stringResource(R.string.action_pause))
             }
-            OutlinedButton(onClick = onPauseShort) {
+            OutlinedButton(onClick = actions.onPauseShort, modifier = Modifier.heightIn(min = 48.dp)) {
                 Icon(Icons.Filled.Timer, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(Spacing.xs))
                 Text(stringResource(R.string.action_pause_15))
             }
         }
@@ -264,90 +346,52 @@ private fun PauseControls(state: RecordUiState, onPause: () -> Unit, onPauseShor
 }
 
 @Composable
-private fun LevelCard(level: Float, speech: Boolean, active: Boolean) {
-    val shown by animateFloatAsState(if (active) level.coerceIn(0f, 1f) else 0f, tween(120), label = "level")
-    val speechColor by animateColorAsState(
-        if (speech && active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-        label = "speech",
-    )
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(stringResource(R.string.record_level), style = MaterialTheme.typography.titleSmall)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .fillMaxWidth(shown)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(12.dp)
-                        .clip(CircleShape)
-                        .background(speechColor),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    stringResource(if (speech && active) R.string.record_speech_detected else R.string.record_no_speech),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MicCard(current: AudioInputInfo?, preference: MicPreference, onChoose: () -> Unit) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(current?.type?.let(::iconFor) ?: Icons.Filled.Mic, contentDescription = null)
-            Spacer(Modifier.width(12.dp))
+private fun ProblemCard(msg: Int, onOpenSettings: () -> Unit) {
+    O2bCard(
+        Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        border = null,
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Filled.Warning, contentDescription = null)
+            Spacer(Modifier.width(Spacing.sm))
             Column(Modifier.weight(1f)) {
-                Text(current?.name ?: stringResource(R.string.record_mic_none), style = MaterialTheme.typography.titleMedium)
-                Text(
-                    stringResource(R.string.record_mic_preference, preferenceLabel(preference)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = onChoose) { Text(stringResource(R.string.record_mic_choose)) }
-        }
-    }
-}
-
-@Composable
-private fun StatsCard(state: RecordUiState) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                stringResource(R.string.record_stored_today, Formatters.duration(state.storedTodayMs)),
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            Text(
-                stringResource(
-                    R.string.record_storage,
-                    Formatters.bytes(state.storage.recordingsBytes),
-                    Formatters.bytes(state.storage.freeBytes),
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            if (state.storage.low) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.record_storage_low), color = MaterialTheme.colorScheme.error)
+                Text(stringResource(msg), style = MaterialTheme.typography.bodyMedium)
+                if (msg == R.string.record_mic_denied) {
+                    TextButton(onClick = onOpenSettings, contentPadding = ButtonDefaults.TextButtonWithIconContentPadding) {
+                        Text(stringResource(R.string.open_app_settings), color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StatsRow(state: RecordUiState) {
+    Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        StatTile(
+            label = stringResource(R.string.stat_spoken_today),
+            value = Formatters.duration(state.storedTodayMs),
+            icon = Icons.Outlined.RecordVoiceOver,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        )
+        StatTile(
+            label = stringResource(R.string.stat_recordings),
+            value = Formatters.bytes(state.storage.recordingsBytes),
+            icon = Icons.Outlined.Folder,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        )
+        StatTile(
+            label = stringResource(if (state.storage.low) R.string.stat_free_low else R.string.stat_free),
+            value = Formatters.bytes(state.storage.freeBytes),
+            icon = Icons.Filled.SdStorage,
+            tint = O2bTheme.extra.meeting,
+            warning = state.storage.low,
+            modifier = Modifier.weight(1f).fillMaxHeight(),
+        )
     }
 }
 
@@ -369,20 +413,33 @@ private fun MicDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.Mic, contentDescription = null) },
         title = { Text(stringResource(R.string.record_mic_dialog_title)) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 options.forEach { option ->
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .heightIn(min = 52.dp)
                             .selectable(selected = option == preference, role = Role.RadioButton, onClick = { onSelect(option) })
-                            .padding(vertical = 8.dp),
+                            .padding(vertical = Spacing.xxs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         RadioButton(selected = option == preference, onClick = null)
-                        Spacer(Modifier.width(12.dp))
-                        Text(preferenceLabel(option))
+                        Spacer(Modifier.width(Spacing.sm))
+                        Icon(
+                            when (option) {
+                                MicPreference.Auto -> Icons.Filled.Mic
+                                MicPreference.BuiltInOnly -> Icons.Filled.Smartphone
+                                is MicPreference.Specific -> iconFor(option.type)
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.width(Spacing.sm))
+                        Text(preferenceLabel(option), style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 if (inputs.isEmpty()) {
@@ -390,13 +447,14 @@ private fun MicDialog(
                         stringResource(R.string.record_mic_dialog_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = Spacing.xs),
                     )
                 }
                 Text(
                     stringResource(R.string.record_mic_sco_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
         },
@@ -411,10 +469,65 @@ fun preferenceLabel(pref: MicPreference): String = when (pref) {
     is MicPreference.Specific -> pref.productName
 }
 
-private fun iconFor(type: InputType): ImageVector = when (type) {
+internal fun iconFor(type: InputType): ImageVector = when (type) {
     InputType.BuiltIn -> Icons.Filled.Smartphone
     InputType.BluetoothSco, InputType.BluetoothLe -> Icons.Filled.Bluetooth
     InputType.Wired -> Icons.Filled.Headset
     InputType.Usb -> Icons.Filled.Usb
     InputType.Other -> Icons.Filled.Mic
+}
+
+// ---------------------------------------------------------------- Beispieldaten für Previews und Screenshots
+
+object RecordSamples {
+    private const val NOW = 1_763_560_800_000L // 19.11.2025, 15:00 MEZ
+
+    val recording = RecordUiState(
+        status = DisplayStatus.Recording,
+        engine = EngineState(
+            status = EngineStatus.Recording,
+            currentInput = AudioInputInfo(7, "Pixel Buds Pro", InputType.BluetoothSco),
+            level = 0.55f,
+            speechActive = true,
+            sessionStartedAt = NOW - (3 * 60 + 12) * 60_000L,
+        ),
+        storedTodayMs = (2 * 60 + 47) * 60_000L,
+        storage = StorageInfo(recordingsBytes = 1_310_000_000, freeBytes = 41_800_000_000),
+        now = NOW,
+        serviceRunning = true,
+    )
+
+    val off = RecordUiState(storage = StorageInfo(recordingsBytes = 1_310_000_000, freeBytes = 41_800_000_000), now = NOW)
+
+    val meeting = Marker(
+        id = "m1",
+        type = MarkerType.Meeting,
+        startEpochMs = NOW - 23 * 60_000L - 10_000,
+        title = "Wochenplanung Team",
+        createdAtEpochMs = NOW,
+    )
+
+    val transcribing = TranscriptionStatus(
+        running = true,
+        currentFile = "2025-11-19_13-00.ogg",
+        progress = 0.62f,
+        pendingCount = 3,
+        lastRealTimeFactor = 0.14f,
+    )
+}
+
+@Preview(name = "Jetzt – dunkel", showBackground = true, backgroundColor = 0xFF0B1220, heightDp = 1100)
+@Composable
+private fun RecordPreviewDark() = de.open2ndbrain.ui.theme.O2bTheme(darkTheme = true) {
+    androidx.compose.material3.Surface {
+        RecordContent(RecordSamples.recording, RecordSamples.meeting, RecordSamples.transcribing, null, RecordActions())
+    }
+}
+
+@Preview(name = "Jetzt – hell, aus", showBackground = true, heightDp = 1000)
+@Composable
+private fun RecordPreviewLight() = de.open2ndbrain.ui.theme.O2bTheme(darkTheme = false) {
+    androidx.compose.material3.Surface {
+        RecordContent(RecordSamples.off, null, TranscriptionStatus(), null, RecordActions())
+    }
 }

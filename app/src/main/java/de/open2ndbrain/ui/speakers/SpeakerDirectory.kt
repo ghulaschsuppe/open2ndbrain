@@ -2,6 +2,7 @@ package de.open2ndbrain.ui.speakers
 
 import androidx.compose.ui.graphics.Color
 import de.open2ndbrain.core.SpeakerProfile
+import de.open2ndbrain.ui.theme.SpeakerColorsDark
 
 /** Nachschlagetabelle für Sprecher-IDs aus Transkripten (inkl. Aliasse nach dem Zusammenführen). */
 class SpeakerDirectory(profiles: List<SpeakerProfile>) {
@@ -17,11 +18,11 @@ class SpeakerDirectory(profiles: List<SpeakerProfile>) {
     companion object {
         val EMPTY = SpeakerDirectory(emptyList())
 
-        /** Feste, in hell und dunkel lesbare Farben; Zuordnung über die Sprechernummer. */
-        val PALETTE = listOf(
-            Color(0xFF1E88E5), Color(0xFFD81B60), Color(0xFF43A047), Color(0xFFF4511E),
-            Color(0xFF8E24AA), Color(0xFF00897B), Color(0xFFC0A000), Color(0xFF6D4C41),
-        )
+        /**
+         * Sprecherfarben (dunkles Thema); Zuordnung über die Sprechernummer. In Composables bitte
+         * [speakerColor] nutzen – das wählt je nach Thema die passende Helligkeit.
+         */
+        val PALETTE: List<Color> = SpeakerColorsDark
 
         fun colorIndex(number: Int): Int = Math.floorMod(number - 1, PALETTE.size)
 

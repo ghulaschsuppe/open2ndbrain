@@ -1,25 +1,39 @@
 package de.open2ndbrain.ui.record
 
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -37,11 +51,23 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import de.open2ndbrain.R
 import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.ui.Formatters
+import de.open2ndbrain.ui.components.IconBubble
+import de.open2ndbrain.ui.components.O2bCard
+import de.open2ndbrain.ui.components.SectionLabel
+import de.open2ndbrain.ui.components.StatusDot
+import de.open2ndbrain.ui.theme.O2bTextStyles
+import de.open2ndbrain.ui.theme.O2bTheme
+import de.open2ndbrain.ui.theme.Spacing
+import de.open2ndbrain.ui.theme.tabular
 
 /** Meeting starten/beenden (mit laufender Dauer und Titel) und „Merken“ (Lesezeichen, 30 s Rückblick). */
 @Composable
@@ -54,62 +80,96 @@ fun MeetingCard(
     onBookmark: () -> Unit,
     bookmarkEnabled: Boolean,
 ) {
-    val context = LocalContext.current
+    val extra = O2bTheme.extra
     val haptic = LocalHapticFeedback.current
     var editTitle by remember { mutableStateOf(false) }
     val active = meeting != null
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = if (active) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer) else CardDefaults.cardColors(),
+
+    O2bCard(
+        Modifier.fillMaxWidth().animateContentSize(),
+        color = if (active) extra.meetingContainer else MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = if (active) extra.onMeetingContainer else MaterialTheme.colorScheme.onSurface,
+        border = if (active) BorderStroke(1.dp, extra.meeting.copy(alpha = 0.45f)) else null,
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (meeting != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Groups, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
+        AnimatedContent(targetState = meeting, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "meeting") { m ->
+            if (m != null) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(extra.meeting, pulsing = true)
+                        Spacer(Modifier.width(Spacing.xs))
+                        SectionLabel(stringResource(R.string.meeting_running), color = extra.meeting, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { editTitle = true }) {
+                            Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.meeting_title_edit))
+                        }
+                    }
                     Text(
-                        meeting.title ?: stringResource(R.string.meeting_running),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
+                        m.title ?: stringResource(R.string.meeting_untitled),
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    IconButton(onClick = { editTitle = true }) {
-                        Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.meeting_title_edit))
+                    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = Spacing.xxs)) {
+                        Text(
+                            Formatters.stopwatch(now - m.startEpochMs),
+                            style = MaterialTheme.typography.headlineLarge.tabular(),
+                            color = extra.meeting,
+                        )
+                        Spacer(Modifier.width(Spacing.xs))
+                        Text(
+                            stringResource(R.string.meeting_since, Formatters.time(m.startEpochMs)),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
                     }
                 }
-                Text(
-                    stringResource(R.string.meeting_since, Formatters.time(meeting.startEpochMs)),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconBubble(Icons.Filled.Groups, tint = extra.meeting)
+                    Spacer(Modifier.width(Spacing.sm))
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.meeting_card_title), style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            stringResource(R.string.meeting_card_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (meeting != null) {
-                    Button(
-                        onClick = onEnd,
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.meeting_end_running, Formatters.stopwatch(now - meeting.startEpochMs)))
-                    }
-                } else {
-                    Button(onClick = onStart, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Filled.Groups, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.action_meeting_start))
-                    }
-                }
-                OutlinedButton(
+        }
+        Spacer(Modifier.size(Spacing.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs), verticalAlignment = Alignment.CenterVertically) {
+            if (meeting != null) {
+                Button(
                     onClick = {
-                        onBookmark()
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        Toast.makeText(context, R.string.bookmark_saved, Toast.LENGTH_SHORT).show()
+                        onEnd()
                     },
-                    enabled = bookmarkEnabled,
+                    colors = ButtonDefaults.buttonColors(containerColor = extra.meeting, contentColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                 ) {
-                    Icon(Icons.Filled.BookmarkAdd, contentDescription = null)
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.bookmark_action))
+                    Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text(stringResource(R.string.meeting_end_short), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onStart()
+                    },
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = extra.meetingContainer,
+                        contentColor = extra.onMeetingContainer,
+                    ),
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                ) {
+                    Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(Spacing.xs))
+                    Text(stringResource(R.string.action_meeting_start), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
+            BookmarkButton(onBookmark, bookmarkEnabled, onAmber = active)
         }
     }
     if (editTitle && meeting != null) {
@@ -124,6 +184,28 @@ fun MeetingCard(
     }
 }
 
+@Composable
+private fun BookmarkButton(onBookmark: () -> Unit, enabled: Boolean, onAmber: Boolean) {
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val extra = O2bTheme.extra
+    OutlinedButton(
+        onClick = {
+            onBookmark()
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            Toast.makeText(context, R.string.bookmark_saved, Toast.LENGTH_SHORT).show()
+        },
+        enabled = enabled,
+        border = BorderStroke(1.dp, if (enabled) extra.meeting.copy(alpha = if (onAmber) 0.8f else 0.6f) else MaterialTheme.colorScheme.outlineVariant),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (onAmber) extra.onMeetingContainer else extra.meeting),
+        modifier = Modifier.heightIn(min = 48.dp),
+    ) {
+        Icon(Icons.Filled.Flag, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(R.string.bookmark_action))
+    }
+}
+
 /** Dialog zum (Um-)Benennen von Meetings und Lesezeichen. */
 @Composable
 fun TitleDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit, label: Int = R.string.meeting_title_label) {
@@ -131,35 +213,96 @@ fun TitleDialog(initial: String, onSave: (String) -> Unit, onDismiss: () -> Unit
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(label)) },
-        text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true) },
+        text = { OutlinedTextField(value = text, onValueChange = { text = it }, singleLine = true, shape = MaterialTheme.shapes.medium) },
         confirmButton = { TextButton(onClick = { onSave(text) }) { Text(stringResource(R.string.save)) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
 
-/** Zeile mit dem Transkriptions-Status: läuft x %, n in Warteschlange, Echtzeitfaktor, Wartegrund. */
+/**
+ * Transkriptions-Karte: Fortschrittsring, Status, Warteschlange, Echtzeitfaktor, Wartegrund.
+ * [onTranscribeNow] (optional) zeigt „Jetzt transkribieren“, wenn Dateien warten.
+ */
 @Composable
-fun TranscriptionCard(status: TranscriptionStatus) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.transcription_card_title), style = MaterialTheme.typography.titleSmall)
-            when {
-                status.running -> {
-                    Text(stringResource(R.string.transcription_running, Formatters.percent(status.progress)))
-                    LinearProgressIndicator(progress = { status.progress }, modifier = Modifier.fillMaxWidth())
+fun TranscriptionCard(status: TranscriptionStatus, onTranscribeNow: (() -> Unit)? = null) {
+    val scheme = MaterialTheme.colorScheme
+    O2bCard(Modifier.fillMaxWidth().animateContentSize()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ProgressRing(status)
+            Spacer(Modifier.width(Spacing.md))
+            Column(Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }) {
+                SectionLabel(stringResource(R.string.transcription_card_title))
+                val headline = when {
+                    status.running -> stringResource(R.string.transcription_running, Formatters.percent(status.progress))
+                    status.waitingReason != null -> status.waitingReason
+                    status.pendingCount == 0 -> stringResource(R.string.transcription_idle)
+                    else -> stringResource(R.string.transcription_scheduled)
                 }
-                status.waitingReason != null -> Text(status.waitingReason, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                status.pendingCount == 0 -> Text(stringResource(R.string.transcription_idle), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                else -> Text(stringResource(R.string.transcription_scheduled), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(headline, style = MaterialTheme.typography.titleMedium.tabular())
+                val details = buildList {
+                    if (status.pendingCount > 0) add(pluralStringResource(R.plurals.transcription_queue, status.pendingCount, status.pendingCount))
+                    status.lastRealTimeFactor?.let { add(stringResource(R.string.transcription_rtf, Formatters.realTimeFactor(it))) }
+                }
+                if (details.isNotEmpty()) {
+                    Text(
+                        details.joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall.tabular(),
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
             }
-            val details = buildList {
-                if (status.pendingCount > 0) add(pluralStringResource(R.plurals.transcription_queue, status.pendingCount, status.pendingCount))
-                status.lastRealTimeFactor?.let { add(stringResource(R.string.transcription_rtf, Formatters.realTimeFactor(it))) }
+        }
+        status.lastError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.error,
+                modifier = Modifier.padding(top = Spacing.xs),
+            )
+        }
+        if (onTranscribeNow != null && !status.running && status.pendingCount > 0) {
+            FilledTonalButton(
+                onClick = onTranscribeNow,
+                modifier = Modifier.padding(top = Spacing.sm).fillMaxWidth().heightIn(min = 48.dp),
+            ) {
+                Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(Spacing.xs))
+                Text(stringResource(R.string.meeting_transcribe_now))
             }
-            if (details.isNotEmpty()) {
-                Text(details.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ProgressRing(status: TranscriptionStatus) {
+    val scheme = MaterialTheme.colorScheme
+    val progress by animateFloatAsState(if (status.running) status.progress.coerceIn(0f, 1f) else 0f, label = "ring")
+    Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+        when {
+            status.running -> {
+                CircularProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.size(56.dp),
+                    strokeWidth = 5.dp,
+                    trackColor = scheme.surfaceContainerHighest,
+                )
+                Text(
+                    "${(progress * 100).toInt()}",
+                    style = O2bTextStyles.metric.copy(fontSize = MaterialTheme.typography.titleSmall.fontSize),
+                )
             }
-            status.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            else -> {
+                val done = status.pendingCount == 0 && status.waitingReason == null
+                IconBubble(
+                    when {
+                        done -> Icons.Filled.CheckCircle
+                        status.waitingReason != null -> Icons.Filled.HourglassTop
+                        else -> Icons.AutoMirrored.Filled.Notes
+                    },
+                    tint = if (done) O2bTheme.extra.success else scheme.secondary,
+                    size = 56.dp,
+                )
+            }
         }
     }
 }

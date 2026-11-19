@@ -3,6 +3,7 @@
     <style name="Theme.Open2ndBrain" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 
     <!-- Unsichtbares Trampolin zum Starten des Mikrofon-Dienstes (Kachel, „Aufnahme fortsetzen“) -->

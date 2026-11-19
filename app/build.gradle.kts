@@ -97,6 +97,8 @@ android {
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // Für die Screenshot-Tests (Robolectric braucht Ressourcen und Schriften)
+        unitTests.isIncludeAndroidResources = true
         // Optionaler Integrationstest mit Linux-JNI von sherpa-onnx (siehe SherpaIntegrationTest)
         unitTests.all { test ->
             System.getenv("O2B_SHERPA_JNI")?.let { test.systemProperty("java.library.path", it) }
@@ -104,6 +106,13 @@ android {
                 System.getenv(k)?.let { test.environment(k, it) }
             }
             test.testLogging { showStandardStreams = System.getenv("O2B_SHERPA_JNI") != null }
+            // Screenshots der Bildschirme (docs/screenshots/) nur auf Wunsch: O2B_SCREENSHOTS=1 ./gradlew testDebugUnitTest
+            if (System.getenv("O2B_SCREENSHOTS") == null) {
+                test.exclude("**/screenshots/**")
+            } else {
+                test.systemProperty("o2b.screenshotDir", rootProject.file("docs/screenshots").absolutePath)
+                test.maxHeapSize = "2g"
+            }
         }
     }
 }
@@ -134,4 +143,8 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }
