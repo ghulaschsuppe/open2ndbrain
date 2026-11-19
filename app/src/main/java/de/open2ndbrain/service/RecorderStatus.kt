@@ -77,7 +77,7 @@ data class NotificationModel(
 }
 
 /** Meldung der Engine bei vollem Speicher (Präfix; Antippen von „Fortsetzen“ hilft dann nicht). */
-const val ENGINE_MSG_STORAGE_FULL = "Speicher voll"
+const val ENGINE_MSG_STORAGE_FULL = de.open2ndbrain.audio.AudioRecordingEngine.MSG_NO_SPACE
 
 fun isStorageFull(errorMessage: String?): Boolean =
     errorMessage?.trim()?.startsWith(ENGINE_MSG_STORAGE_FULL, ignoreCase = true) == true
