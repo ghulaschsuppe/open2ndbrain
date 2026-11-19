@@ -20,6 +20,8 @@ import java.nio.file.Files
  *  - O2B_SHERPA_JNI: Ordner mit libsherpa-onnx-jni.so + libonnxruntime.so (sherpa-onnx-vX-linux-x64-jni/lib)
  *  - O2B_MODELS: Ordner mit parakeet/ (encoder/decoder/joiner/tokens), silero_vad.onnx, wespeaker_en_voxceleb_resnet34.onnx
  *  - O2B_TEST_WAV: 16-kHz-Mono-WAV (PCM16); optional O2B_TEST_TRUTH: Zeilen "start end sprecher" in Sekunden
+ *  - optional O2B_TEST_WAV2 / O2B_TEST_TRUTH2: zweite Aufnahme derselben Sprecher (andere Textstellen) für Runde 2 –
+ *    prüft die Wiedererkennung über Dateien: gleiche wahre Sprecher müssen dieselben Profil-IDs wie in Runde 1 bekommen.
  */
 class SherpaIntegrationTest {
 
@@ -32,17 +34,18 @@ class SherpaIntegrationTest {
         System.load(File(jni, "libonnxruntime.so").absolutePath)
         System.load(File(jni, "libsherpa-onnx-jni.so").absolutePath)
 
-        val pcm = readWav16k(wav!!)
-        val source = PcmSource { sink -> var i = 0; while (i < pcm.size) { val n = minOf(16_000, pcm.size - i); sink(pcm.copyOfRange(i, i + n), n); i += n } }
+        fun sourceOf(pcm: FloatArray) = PcmSource { sink -> var i = 0; while (i < pcm.size) { val n = minOf(16_000, pcm.size - i); sink(pcm.copyOfRange(i, i + n), n); i += n } }
+        fun truthOf(env: String) = System.getenv(env)?.let { File(it) }?.takeIf { it.isFile }?.readLines()
+            ?.filter { it.isNotBlank() }
+            ?.map { l -> l.split(" ").let { Triple(it[0].toDouble(), it[1].toDouble(), it[2]) } }
+        val wav2 = System.getenv("O2B_TEST_WAV2")?.let(::File)?.takeIf { it.isFile }
+        val inputs = listOf(readWav16k(wav!!) to truthOf("O2B_TEST_TRUTH"), (wav2?.let(::readWav16k) ?: readWav16k(wav)) to (if (wav2 != null) truthOf("O2B_TEST_TRUTH2") else truthOf("O2B_TEST_TRUTH")))
+        println("Runde 2 mit ${if (wav2 != null) "zweiter Aufnahme ${wav2.name}" else "derselben Datei"}")
         val vad = File(models, "silero_vad.onnx")
         val speakersDir = Files.createTempDirectory("spk").toFile()
         val repo = FileSpeakerRepository(speakersDir)
         val start = 1_700_000_000_000L
-        val mapper = FileTimeMapper(listOf(RecordingSidecar.Segment(0, start, pcm.size / 16L)), start)
-
-        val truth = System.getenv("O2B_TEST_TRUTH")?.let { File(it) }?.takeIf { it.isFile }?.readLines()
-            ?.filter { it.isNotBlank() }
-            ?.map { l -> l.split(" ").let { Triple(it[0].toDouble(), it[1].toDouble(), it[2]) } }
+        var idToTruth: Map<String?, String> = emptyMap()
 
         SherpaRecognizer(File(models, "parakeet"), 4).use { rec ->
             SherpaEmbedder(File(models, "wespeaker_en_voxceleb_resnet34.onnx"), 4).use { emb ->
@@ -56,6 +59,9 @@ class SherpaIntegrationTest {
                 // Runde 1: neue Profile; Runde 2: dieselbe Datei erneut → Wiedererkennung, keine neuen Profile
                 var profilesAfterFirst = 0
                 for (round in 1..2) {
+                    val (pcm, truth) = inputs[round - 1]
+                    val source = sourceOf(pcm)
+                    val mapper = FileTimeMapper(listOf(RecordingSidecar.Segment(0, start, pcm.size / 16L)), start)
                     val t0 = System.currentTimeMillis()
                     val result = pipeline.run(source, mapper, pcm.size.toLong()) {}
                     val secs = (System.currentTimeMillis() - t0) / 1000.0
@@ -77,7 +83,11 @@ class SherpaIntegrationTest {
                             val t = truth.firstOrNull { mid in it.first..it.second } ?: return@mapNotNull null
                             Triple(u.speakerId, t.third, u.durationMs)
                         }
-                        val major = pairs.groupBy { it.first }.mapValues { (_, l) -> l.groupBy { it.second }.maxBy { it.value.sumOf { p -> p.third } }.key }
+                        // Runde 1: Mehrheitszuordnung festlegen; Runde 2: dieselbe Zuordnung verwenden (= Wiedererkennung)
+                        val major = if (round == 1) {
+                            pairs.groupBy { it.first }.mapValues { (_, l) -> l.groupBy { it.second }.maxBy { it.value.sumOf { p -> p.third } }.key }
+                                .also { idToTruth = it }
+                        } else idToTruth
                         val ok = pairs.filter { it.first != null && major[it.first] == it.second }.sumOf { it.third }
                         val all = pairs.sumOf { it.third }
                         val share = ok.toDouble() / all
