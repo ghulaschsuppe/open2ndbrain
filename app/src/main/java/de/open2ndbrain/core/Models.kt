@@ -29,9 +29,35 @@ data class ModelSpec(
     val attribution: String,
     /** Wird bei der Einrichtung empfohlen bzw. ist für die Transkription nötig. */
     val required: Boolean,
+    /** Nur für [ModelKind.Asr]: welche sherpa-onnx-Engine das Modell lädt. */
+    val asrEngine: AsrEngine? = null,
+    /** Nur für Asr: Sprache fest eingestellt (z. B. "de"); null = automatische Erkennung bzw. einsprachig. */
+    val language: String? = null,
+    /** Nur für Asr: Messwerte aus `docs/dev/PHASE2-MESSUNGEN.md` für die Auswahlliste (null = nicht gemessen). */
+    val benchmark: AsrBenchmark? = null,
+    /** Hervorgehoben als Empfehlung in der Auswahlliste. */
+    val recommended: Boolean = false,
 ) {
     val sizeBytes: Long get() = files.sumOf { it.sizeBytes }
 }
+
+/** Wie das ASR-Modell in sherpa-onnx geladen wird; bestimmt auch, ob es Wort-Zeitstempel liefert. */
+enum class AsrEngine(val hasTokenTimestamps: Boolean) {
+    /** NeMo Transducer (Parakeet), `OfflineTransducerModelConfig`, modelType "nemo_transducer". */
+    NemoTransducer(true),
+    /** NeMo CTC (FastConformer), `OfflineNemoEncDecCtcModelConfig`. */
+    NemoCtc(true),
+    /** NeMo Canary, `OfflineCanaryModelConfig` mit srcLang/tgtLang = [ModelSpec.language]. Keine Zeitstempel. */
+    NemoCanary(false),
+    /** Whisper, `OfflineWhisperModelConfig` mit language = [ModelSpec.language]. Keine Zeitstempel. */
+    Whisper(false),
+}
+
+/**
+ * Messwerte (FLEURS-de, 40 Sätze; „Alltag“ = leise, Hall, Rauschen 8 dB SNR, Opus 16 kbit/s).
+ * Wortfehlerrate in Prozent, Echtzeitfaktor am Entwicklungsrechner (4 Threads) – am Handy grob 2–5× höher.
+ */
+data class AsrBenchmark(val werCleanPct: Double, val werEverydayPct: Double, val realTimeFactor: Double)
 
 object ModelCatalog {
     val PARAKEET_V3 = ModelSpec(
@@ -48,7 +74,74 @@ object ModelCatalog {
         languages = "25 europäische Sprachen, u. a. Deutsch, Englisch, Französisch, Spanisch, Italienisch",
         license = "CC-BY-4.0",
         attribution = "NVIDIA parakeet-tdt-0.6b-v3, ONNX-Export von k2-fsa/sherpa-onnx",
-        required = true,
+        required = false,
+        asrEngine = AsrEngine.NemoTransducer,
+        benchmark = AsrBenchmark(werCleanPct = 7.9, werEverydayPct = 59.0, realTimeFactor = 0.17),
+    )
+
+    val DE_FASTCONFORMER = ModelSpec(
+        id = "nemo-de-fastconformer-large-pc-int8",
+        displayName = "Deutsch – schnell (FastConformer)",
+        kind = ModelKind.Asr,
+        files = listOf(
+            hfFile("sherpa-onnx-nemo-stt_de_fastconformer_hybrid_large_pc-int8", "model.int8.onnx",
+                "fcf42d4fd55b42b0b11fed368b04467f0a636a52f44bcacd3f4667697c26e259", 131_652_945),
+            hfFile("sherpa-onnx-nemo-stt_de_fastconformer_hybrid_large_pc-int8", "tokens.txt",
+                "abb1136142604d6d1766ad5060bd4f4b1048d7a096cd094b2d40eec3e666be9f", 10_686),
+        ),
+        description = "Nur Deutsch – kein Abdriften ins Englische. Sehr schnell und robust bei leisen Aufnahmen. Mit Satzzeichen.",
+        languages = "Deutsch",
+        license = "CC-BY-4.0",
+        attribution = "NVIDIA stt_de_fastconformer_hybrid_large_pc, ONNX-Export von k2-fsa/sherpa-onnx",
+        required = false,
+        asrEngine = AsrEngine.NemoCtc,
+        language = "de",
+        benchmark = AsrBenchmark(werCleanPct = 6.6, werEverydayPct = 19.0, realTimeFactor = 0.03),
+        recommended = true,
+    )
+
+    val CANARY_180M_DE = ModelSpec(
+        id = "nemo-canary-180m-flash-int8",
+        displayName = "Deutsch – genau (Canary 180M)",
+        kind = ModelKind.Asr,
+        files = listOf(
+            hfFile("sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8", "encoder.int8.onnx",
+                "7a75b4e2a5857a6dcc0819503bbe3fad66943db4a3ccf21d3f27c633667d303f", 132_678_643),
+            hfFile("sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8", "decoder.int8.onnx",
+                "e41a2ab9c0c2fe81a1e8ade5a45fb02a74bc4db7d1f91b89a54a25e2cf79cba2", 74_437_848),
+            hfFile("sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8", "tokens.txt",
+                "2dae6fc7815f9640645e0c765522b278ee0cef49b482d91f6913e334628d3e77", 53_555),
+        ),
+        description = "Höchste Genauigkeit im Test, Sprache fest auf Deutsch. Etwa 3× langsamer als „Deutsch – schnell“.",
+        languages = "Deutsch (fest); kann auch Englisch, Spanisch, Französisch",
+        license = "CC-BY-4.0",
+        attribution = "NVIDIA canary-180m-flash, ONNX-Export von k2-fsa/sherpa-onnx",
+        required = false,
+        asrEngine = AsrEngine.NemoCanary,
+        language = "de",
+        benchmark = AsrBenchmark(werCleanPct = 5.9, werEverydayPct = 16.6, realTimeFactor = 0.09),
+    )
+
+    val WHISPER_SMALL = ModelSpec(
+        id = "whisper-small-int8",
+        displayName = "Whisper small (99 Sprachen)",
+        kind = ModelKind.Asr,
+        files = listOf(
+            hfFile("sherpa-onnx-whisper-small", "small-encoder.int8.onnx",
+                "4cbe7b22fa9026b843b60a68640c747de05bafb1a11b57edc0e66c232d9f33a9", 112_442_483),
+            hfFile("sherpa-onnx-whisper-small", "small-decoder.int8.onnx",
+                "acad50b5c782696e91b55914cc5ab4f756f1532f76e22aa6fc615f39fb69a8ee", 262_226_114),
+            hfFile("sherpa-onnx-whisper-small", "small-tokens.txt",
+                "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126", 816_730),
+        ),
+        description = "Sehr viele Sprachen, Sprache fest auf Deutsch. Langsamer und im Alltag schwächer als die Deutsch-Modelle.",
+        languages = "99 Sprachen (hier fest: Deutsch)",
+        license = "MIT",
+        attribution = "OpenAI Whisper, ONNX-Export von k2-fsa/sherpa-onnx",
+        required = false,
+        asrEngine = AsrEngine.Whisper,
+        language = "de",
+        benchmark = AsrBenchmark(werCleanPct = 9.3, werEverydayPct = 35.5, realTimeFactor = 0.26),
     )
 
     val SILERO_VAD = ModelSpec(
@@ -87,9 +180,19 @@ object ModelCatalog {
         required = false,
     )
 
-    val all: List<ModelSpec> = listOf(PARAKEET_V3, SILERO_VAD, WESPEAKER_RESNET34)
+    /** Auswählbare Spracherkennungsmodelle, Empfehlung zuerst. */
+    val asrModels: List<ModelSpec> = listOf(DE_FASTCONFORMER, CANARY_180M_DE, PARAKEET_V3, WHISPER_SMALL)
+
+    /** Standard für neue Installationen. */
+    val DEFAULT_ASR_ID: String = DE_FASTCONFORMER.id
+
+    val all: List<ModelSpec> = asrModels + listOf(SILERO_VAD, WESPEAKER_RESNET34)
 
     fun byId(id: String): ModelSpec? = all.firstOrNull { it.id == id }
+
+    private fun hfFile(repo: String, name: String, sha: String, size: Long) = ModelFile(
+        name, "https://huggingface.co/csukuangfj/$repo/resolve/main/$name", sha, size,
+    )
 
     private fun hf(name: String, sha: String, size: Long) = ModelFile(
         name, "https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/main/$name", sha, size,

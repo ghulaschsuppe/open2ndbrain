@@ -69,3 +69,19 @@ Datei 1 → Datei 2 → Datei 1 sowie „ein Sprecher neu“ mit Profilen nur f�
 Einschränkung: nur zwei Aufnahmen gleicher Qualität (Hörbücher). Für andere Mikrofone/Räume (BT-Headset, Telefon
 auf dem Tisch) sind die Werte auf echten Alltagsaufnahmen nachzuprüfen; die Schwellen sind Konstanten in
 `speakers/SpeakerClustering.kt`.
+
+## Modellvergleich Deutsch (nach Nutzertest: Parakeet „ziemlich schlecht, Englisch dabei“)
+FLEURS-de dev, 40 Sätze (427 s), Wortfehlerrate (WER), Echtzeitfaktor 4 Threads. „Alltag“ = −22 dB leise, Raumhall,
+Rauschen 8 dB SNR, Opus 16 kbit/s; „+Norm“ = Lautstärke-Normalisierung vor der Erkennung. Skript: `tools/model-eval/asr_benchmark_de.py`.
+
+| Modell | Größe | WER sauber | WER Alltag | WER Alltag+Norm | RTF | Zeitstempel |
+|---|---|---|---|---|---|---|
+| Parakeet TDT 0.6B v3 (auto) | 670 MB | 7,9 % | 66,3 % | 59,0 % | 0,12–0,19 | ja |
+| **NeMo FastConformer Deutsch (CTC)** | 132 MB | 6,6 % | 19,2 % | **19,0 %** | **0,02–0,05** | ja |
+| **Canary 180M flash, src=de** | 207 MB | **5,9 %** | 17,8 % | **16,6 %** | 0,09 (sauber 0,34) | nein |
+| Whisper small, language=de | 375 MB | 9,3 % | 35,5 % | – | 0,25 | nein |
+
+**Befund:** Parakeet v3 bricht bei leisen/verrauschten Aufnahmen völlig ein und erkennt die Sprache falsch (→ Englisch).
+Feste Sprache bzw. einsprachige Modelle sind drastisch robuster. **Standard ab jetzt: FastConformer Deutsch**
+(schnell, Zeitstempel); **Canary** als „genau“-Option (ohne Token-Zeitstempel → Äußerungen über VAD-Abschnitte).
+Lautstärke-Normalisierung hilft Parakeet/Canary leicht, schadet nie → immer an.
