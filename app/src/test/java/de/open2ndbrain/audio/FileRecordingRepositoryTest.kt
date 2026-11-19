@@ -4,6 +4,7 @@ import de.open2ndbrain.core.RecordingFile
 import de.open2ndbrain.core.RecordingSidecar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -52,9 +53,14 @@ class FileRecordingRepositoryTest {
         make("2026-11-18_09-00")
         make("2026-11-19_14-00", durationMs = 5000)
         make("2026-11-19_14-00_b", durationMs = 2000)
-        make("2026-11-19_15-00", part = true, durationMs = 300)
+        val active = make("2026-11-19_15-00", part = true, durationMs = 300)
         make("2026-11-19_13-00", sidecar = false)
-        val list = repo().scan()
+        RecordingSignals.markActive(active)
+        val list = try {
+            repo().scan()
+        } finally {
+            RecordingSignals.markInactive(active)
+        }
         assertEquals(
             listOf("2026-11-19_15-00.ogg.part", "2026-11-19_14-00_b.ogg", "2026-11-19_14-00.ogg", "2026-11-19_13-00.ogg", "2026-11-18_09-00.ogg"),
             list.map { it.audio.name },
@@ -66,6 +72,36 @@ class FileRecordingRepositoryTest {
         assertEquals(0L, list[3].durationMs)
         assertEquals(100L, list[3].sizeBytes)
         assertFalse(list[1].inProgress)
+        // ohne aktive Engine ist eine .part-Datei verwaist, nicht „in Arbeit“
+        assertFalse(repo().scan()[0].inProgress)
+    }
+
+    @Test
+    fun deleteOlderThanZeroOrNegativeDeletesNothing() = runBlocking {
+        make("2020-01-01_10-00")
+        val r = repo()
+        assertEquals(0, r.deleteOlderThan(0))
+        assertEquals(0, r.deleteOlderThan(-5))
+        assertEquals(1, r.scan().size)
+    }
+
+    @Test
+    fun firstObserveRecoversOrphansOnlyWithoutRunningEngine() = runBlocking {
+        val ogg = javaClass.getResourceAsStream("/audio/sine_2s.ogg")!!.use { it.readBytes() }
+        val dir = File(tmp.root, "2026/11/19").apply { mkdirs() }
+        File(dir, "2026-11-19_14-00.ogg.part").writeBytes(ogg)
+        // Engine läuft → keine Wiederherstellung durchs Repository
+        RecordingSignals.sessionStarted()
+        try {
+            val list = withTimeout(5_000) { repo().observeRecordings().first() }
+            assertEquals("2026-11-19_14-00.ogg.part", list.single().audio.name)
+        } finally {
+            RecordingSignals.sessionEnded()
+        }
+        val list = withTimeout(5_000) { repo().observeRecordings().first() }
+        assertEquals("2026-11-19_14-00.ogg", list.single().audio.name)
+        assertEquals(2000L, list.single().durationMs)
+        assertFalse(list.single().sidecar!!.complete)
     }
 
     @Test

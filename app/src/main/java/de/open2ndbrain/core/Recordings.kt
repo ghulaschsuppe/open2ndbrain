@@ -75,6 +75,9 @@ interface RecordingRepository {
     /** Löscht Audiodatei + Sidecar. */
     suspend fun delete(recording: RecordingFile)
 
-    /** Löscht abgeschlossene Aufnahmen, deren Stunde älter als [days] Tage ist. Rückgabe: Anzahl gelöschter Dateien. */
+    /**
+     * Löscht abgeschlossene Aufnahmen, deren Stunde älter als [days] Tage ist. Rückgabe: Anzahl gelöschter Dateien.
+     * [days] <= 0 bedeutet „unbegrenzt aufbewahren“: es wird nichts gelöscht (Rückgabe 0).
+     */
     suspend fun deleteOlderThan(days: Int): Int
 }

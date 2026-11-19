@@ -15,12 +15,17 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Aufnahmen auf dem Datenträger (`<root>/YYYY/MM/DD/…`).
  *
  * [observeRecordings] lädt alle [refreshMs] neu und sofort, wenn die Engine über [RecordingSignals]
  * eine Änderung meldet. Sidecars werden nach Pfad + Änderungszeit zwischengespeichert.
+ *
+ * `inProgress` ist nur die Datei, die die Engine gerade schreibt. Verwaiste `.part`-Dateien (Absturz)
+ * werden beim ersten Abo von [observeRecordings] wiederhergestellt, sofern keine Engine läuft
+ * (sonst erledigt das die Engine beim Start).
  */
 class FileRecordingRepository(
     private val root: File,
@@ -32,8 +37,13 @@ class FileRecordingRepository(
     private data class CacheEntry(val modified: Long, val length: Long, val sidecar: RecordingSidecar?)
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
+    private val recoveryDone = AtomicBoolean(false)
 
     override fun observeRecordings(): Flow<List<RecordingFile>> = flow {
+        if (recoveryDone.compareAndSet(false, true)) {
+            runCatching { RecordingSignals.recoverIfIdle(root, zone()) }
+                .onFailure { Log.e(TAG, "Wiederherstellung fehlgeschlagen", it) }
+        }
         while (true) {
             val seen = RecordingSignals.version.value
             emit(scan())
@@ -69,7 +79,7 @@ class FileRecordingRepository(
                     hourStartEpochMs = hourStart,
                     durationMs = sidecar?.let(SidecarIo::storedMs) ?: 0L,
                     sizeBytes = f.length(),
-                    inProgress = fn.part,
+                    inProgress = fn.part && RecordingSignals.isActive(f),
                 )
                 result += rf to (parsed?.partIndex ?: 0)
             }
@@ -96,31 +106,18 @@ class FileRecordingRepository(
     }
 
     override suspend fun delete(recording: RecordingFile) = withContext(Dispatchers.IO) {
-        deleteFiles(recording.audio)
+        deleteRecordingFiles(root, recording.audio)
         RecordingSignals.notifyChanged()
     }
 
-    /** Löscht Audio + Sidecar(s) eines Basisnamens; gerade geschriebene Dateien bleiben unangetastet. */
-    private fun deleteFiles(audio: File): Boolean {
-        val dir = audio.parentFile ?: return false
-        val fn = RecordingLayout.splitFileName(audio.name) ?: return false
-        val related = RecordingLayout.relatedFiles(dir, fn.base)
-        if (related.any { RecordingSignals.isActive(it) }) {
-            Log.w(TAG, "${audio.name} wird gerade geschrieben – nicht gelöscht")
-            return false
-        }
-        var ok = true
-        for (f in related) if (f.exists() && !f.delete()) ok = false
-        pruneEmptyDirs(dir)
-        return ok
-    }
-
     override suspend fun deleteOlderThan(days: Int): Int = withContext(Dispatchers.IO) {
-        val cutoff = now() - days.coerceAtLeast(0) * 24L * 3_600_000L
+        if (days <= 0) return@withContext 0 // 0 = unbegrenzt aufbewahren
+        val cutoff = now() - days * 24L * 3_600_000L
         var count = 0
         for (rf in scan()) {
-            if (rf.inProgress || rf.hourStartEpochMs >= cutoff) continue
-            if (deleteFiles(rf.audio)) count++
+            // nur abgeschlossene Dateien (auch keine verwaisten .part)
+            if (rf.audio.name.endsWith(RecordingLayout.PART) || rf.hourStartEpochMs >= cutoff) continue
+            if (deleteRecordingFiles(root, rf.audio)) count++
         }
         if (count > 0) {
             Log.i(TAG, "$count Aufnahme(n) älter als $days Tage gelöscht")
@@ -129,18 +126,31 @@ class FileRecordingRepository(
         count
     }
 
-    /** Leere Tages-/Monats-/Jahresordner unterhalb des Roots entfernen. */
-    private fun pruneEmptyDirs(start: File) {
-        var d: File? = start
-        val rootPath = root.absoluteFile
-        while (d != null && d.absoluteFile != rootPath && d.absolutePath.startsWith(rootPath.path)) {
-            val children = d.list() ?: break
-            if (children.isNotEmpty() || !d.delete()) break
-            d = d.parentFile
-        }
-    }
-
     private companion object {
         const val TAG = "O2B-Audio"
     }
+}
+
+/**
+ * Löscht Audio + Sidecar(s) eines Basisnamens und leere Ordner bis [root].
+ * Gerade geschriebene Dateien bleiben unangetastet (Rückgabe false).
+ */
+internal fun deleteRecordingFiles(root: File, audio: File): Boolean {
+    val dir = audio.parentFile ?: return false
+    val fn = RecordingLayout.splitFileName(audio.name) ?: return false
+    val related = RecordingLayout.relatedFiles(dir, fn.base)
+    if (related.any { RecordingSignals.isActive(it) }) {
+        Log.w("O2B-Audio", "${audio.name} wird gerade geschrieben – nicht gelöscht")
+        return false
+    }
+    var ok = true
+    for (f in related) if (f.exists() && !f.delete()) ok = false
+    var d: File? = dir
+    val rootPath = root.absoluteFile
+    while (d != null && d.absoluteFile != rootPath && d.absolutePath.startsWith(rootPath.path)) {
+        val children = d.list() ?: break
+        if (children.isNotEmpty() || !d.delete()) break
+        d = d.parentFile
+    }
+    return ok
 }

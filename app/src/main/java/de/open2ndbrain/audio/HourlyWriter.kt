@@ -29,6 +29,7 @@ internal class HourlyWriter(
     private val sampleRate: Int = 16_000,
     private val sidecarIntervalMs: Long = 60_000,
     private val segmentFlushMinIntervalMs: Long = 10_000,
+    private val hourCloseGraceMs: Long = 3_000,
 ) {
     fun interface Listener {
         /** Datei geöffnet ([closed] = false) bzw. abgeschlossen/verworfen ([closed] = true). */
@@ -114,10 +115,20 @@ internal class HourlyWriter(
         close(null)
     }
 
-    /** Periodisch aufrufen: Sidecar sichern. */
-    fun tick() {
+    /**
+     * Periodisch aufrufen: Encoder-Ausgang leeren, Sidecar sichern und – wenn [idle] (keine Frames mehr
+     * in der Warteschlange) – die Datei abschließen, sobald die Stunde seit [hourCloseGraceMs] vorbei ist.
+     * So wird die Datei auch nach Stille pünktlich fertig, nicht erst beim nächsten Sprach-Frame.
+     */
+    fun tick(idle: Boolean = true) {
         val f = file ?: return
         val t = now()
+        if (idle && t >= f.nextHour + hourCloseGraceMs) {
+            Log.i(TAG, "Stunde vorbei ohne neue Frames – ${f.base} wird abgeschlossen")
+            close(null)
+            return
+        }
+        f.encoder.flush()
         if (t - f.lastSidecarWrite >= sidecarIntervalMs ||
             (f.dirty && t - f.lastSidecarWrite >= segmentFlushMinIntervalMs)
         ) {

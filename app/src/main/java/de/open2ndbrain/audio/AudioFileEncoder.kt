@@ -23,6 +23,9 @@ internal interface AudioFileEncoder {
     /** [ptsUs] = Dateizeit des ersten Samples (lückenlos fortlaufend, unabhängig von der Wanduhr). */
     fun write(pcm: ShortArray, offset: Int, length: Int, ptsUs: Long)
 
+    /** Fertig kodierte Daten an den Muxer weitergeben (z. B. nach Stille), ohne die Datei abzuschließen. */
+    fun flush() {}
+
     /** Schließt sauber ab. true = Datei ist vollständig und enthält Audio. */
     fun finish(): Boolean
 
@@ -106,6 +109,10 @@ internal class MediaCodecAudioEncoder(
             pts += n * 1_000_000L / sampleRate
         }
         drain(0)
+    }
+
+    override fun flush() {
+        if (!released) drain(0)
     }
 
     private fun drain(timeoutUs: Long): Boolean {

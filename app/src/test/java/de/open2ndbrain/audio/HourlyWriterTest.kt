@@ -20,6 +20,11 @@ internal class FakeEncoder(file: File, override val format: AudioFileFormat) : A
     private val out = FileOutputStream(file)
     val pts = ArrayList<Long>()
     var finishResult = true
+    var flushes = 0
+
+    override fun flush() {
+        flushes++
+    }
 
     override fun write(pcm: ShortArray, offset: Int, length: Int, ptsUs: Long) {
         pts += ptsUs
@@ -181,6 +186,24 @@ class HourlyWriterTest {
         w.close(null)
         assertNull(w.currentFile)
         assertFalse(RecordingSignals.isActive(audioPart))
+    }
+
+    @Test
+    fun tickClosesFileAfterHourWithoutFrames() {
+        val w = writer()
+        w.frames(at("2026-11-19T14:59:00"), 50)
+        val dir = dayDir("2026-11-19T14:00:00")
+        nowMs = at("2026-11-19T15:00:02")
+        w.tick()
+        assertNotNull(w.currentFile) // Karenzzeit 3 s noch nicht vorbei
+        assertTrue(encoders.single().flushes > 0) // Encoder-Ausgang wird geleert
+        nowMs = at("2026-11-19T15:00:04")
+        w.tick(idle = false) // noch Frames in der Warteschlange → nicht schließen
+        assertNotNull(w.currentFile)
+        w.tick(idle = true)
+        assertNull(w.currentFile)
+        assertTrue(File(dir, "2026-11-19_14-00.ogg").exists())
+        assertTrue(sidecar(File(dir, "2026-11-19_14-00.json")).complete)
     }
 
     @Test
