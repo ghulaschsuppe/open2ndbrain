@@ -116,6 +116,15 @@ internal class HourlyWriter(
     }
 
     /**
+     * Manuelle Teilung (z. B. Meeting-Ende): offene Datei sauber abschließen; der nächste Frame beginnt
+     * nahtlos eine neue Teildatei. Ereignis `split` in beiden Dateien. Ohne offene Datei: nichts tun.
+     */
+    fun splitNow(reason: String) {
+        if (file == null) return
+        split(EVENT_SPLIT, reason)
+    }
+
+    /**
      * Periodisch aufrufen: Encoder-Ausgang leeren, Sidecar sichern und – wenn [idle] (keine Frames mehr
      * in der Warteschlange) – die Datei abschließen, sobald die Stunde seit [hourCloseGraceMs] vorbei ist.
      * So wird die Datei auch nach Stille pünktlich fertig, nicht erst beim nächsten Sprach-Frame.
@@ -277,8 +286,9 @@ internal class HourlyWriter(
         }
     }
 
-    private companion object {
-        const val TAG = "O2B-Audio"
-        const val MAX_PENDING = 50
+    companion object {
+        const val EVENT_SPLIT = "split"
+        private const val TAG = "O2B-Audio"
+        private const val MAX_PENDING = 50
     }
 }

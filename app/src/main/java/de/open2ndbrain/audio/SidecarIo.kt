@@ -43,6 +43,7 @@ internal object SidecarIo {
         val files = dayDir.listFiles() ?: return 0
         val byBase = HashMap<String, File>()
         for (f in files) {
+            if (RecordingLayout.isTranscriptFile(f.name)) continue
             val fn = RecordingLayout.splitFileName(f.name) ?: continue
             if (fn.ext != RecordingLayout.EXT_JSON || fn.base in exclude) continue
             // Fertiges Sidecar hat Vorrang vor dem .part

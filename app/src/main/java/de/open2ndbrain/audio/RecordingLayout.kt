@@ -118,8 +118,17 @@ internal object RecordingLayout {
             listOf(File(dir, "$base.$ext$PART"), File(dir, "$base.$ext"))
         }
 
-    /** Ist der Basisname schon belegt? `.part` zuerst prüfen (Umbenennen läuft part → final). */
-    fun isTaken(dir: File, base: String): Boolean = relatedFiles(dir, base).any { it.exists() }
+    /** Transkript zum Basisnamen (Phase 2). Wird nie zusammen mit dem Audio gelöscht. */
+    const val TRANSCRIPT_SUFFIX = ".transcript.json"
+
+    fun isTranscriptFile(name: String): Boolean = name.contains(".transcript.")
+
+    /**
+     * Ist der Basisname schon belegt? `.part` zuerst prüfen (Umbenennen läuft part → final).
+     * Ein übrig gebliebenes Transkript belegt den Namen ebenfalls (sonst bekäme neues Audio ein fremdes Transkript).
+     */
+    fun isTaken(dir: File, base: String): Boolean =
+        relatedFiles(dir, base).any { it.exists() } || File(dir, base + TRANSCRIPT_SUFFIX).exists()
 
     /**
      * Ersten freien Basisnamen der Stunde finden (`…_HH-00`, dann `_b`, `_c` …).
