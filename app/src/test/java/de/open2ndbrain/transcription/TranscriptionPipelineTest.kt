@@ -2,7 +2,6 @@ package de.open2ndbrain.transcription
 
 import de.open2ndbrain.core.RecordingSidecar.Segment
 import de.open2ndbrain.speakers.FileSpeakerRepository
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -124,7 +123,7 @@ class TranscriptionPipelineTest {
         asrSegmenter = { FakeVad(minGapMs = 500) },
         speakerSegmenter = speakers?.let { { FakeVad(minGapMs = 250) } },
         embedder = speakers?.let { FakeEmbedder() },
-        matchClusters = { c -> if (speakers == null) List(c.size) { null } else runBlocking { speakers.matchOrCreate(c, 0) } },
+        speakers = speakers,
     )
 
     @Test

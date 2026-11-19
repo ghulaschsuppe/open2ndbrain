@@ -48,50 +48,99 @@ data class ClusterSummary(
 }
 
 /**
- * Lokales Clustering innerhalb einer Datei: inkrementell per Cosinus (wie in tools/model-eval/speaker_cluster.py),
- * danach [refineRounds] Runden Neuzuordnung zum nächsten Zentrum (robuster gegen Reihenfolge-Effekte).
+ * Sprecher-Clustering einer Datei mit bekannten Profilen als feste Start-Cluster („Seeds“).
+ *
+ * Ablauf (Messungen und Schwellen: docs/dev/PHASE2-MESSUNGEN.md):
+ * 1. Gierig je Abschnitt: bestes Zentrum unter Seeds (Schwelle [SEED_THRESHOLD]) und lokalen Clustern
+ *    (Summen-Zentrum, Schwelle [DEFAULT_THRESHOLD]); keins passt → neuer lokaler Cluster.
+ * 2. [refineRounds] Runden Neuzuordnung jedes Abschnitts zum ähnlichsten Zentrum (Seeds bleiben fest).
+ * 3. Lokale Cluster mit Zentren-Cosinus ≥ [MERGE_THRESHOLD] zu einem Seed oder einem anderen lokalen Cluster
+ *    werden zusammengelegt.
+ *
+ * Warum Seeds: In einer Datei können sich Abschnitte zweier Sprecher stärker ähneln als dem eigenen Zentrum
+ * (gemessen bis 0,87 gegen fremd); die über Dateien gelernten Profile trennen sie dagegen sauber.
  */
 object SpeakerClustering {
+    /** Abschnitt ↔ lokales Summen-Zentrum (wie tools/model-eval/speaker_cluster.py). */
     const val DEFAULT_THRESHOLD = 0.6
+
+    /** Abschnitt ↔ gespeichertes Profil (Plateau 0,6–0,75 gemessen, Mitte gewählt). */
+    const val SEED_THRESHOLD = 0.68
+
+    /** Zentrum ↔ Zentrum: gleicher Sprecher 0,92–0,98, verschiedene ≤ 0,81 → Mitte. */
+    const val MERGE_THRESHOLD = 0.88
 
     data class Item(val embedding: FloatArray, val speechMs: Long)
 
-    data class Result(val labels: IntArray, val clusters: List<ClusterSummary>)
+    /**
+     * @param labels Clusterindex je Item (Index in [clusters]).
+     * @param seedOf je Cluster: Index des Seeds (bekanntes Profil) oder null für einen neuen Cluster.
+     */
+    data class Result(val labels: IntArray, val clusters: List<ClusterSummary>, val seedOf: List<Int?>)
 
-    fun cluster(items: List<Item>, threshold: Double = DEFAULT_THRESHOLD, refineRounds: Int = 2): Result {
-        if (items.isEmpty()) return Result(IntArray(0), emptyList())
+    /** Ohne bekannte Profile. */
+    fun cluster(items: List<Item>, threshold: Double = DEFAULT_THRESHOLD, refineRounds: Int = 2): Result =
+        clusterSeeded(items, emptyList(), localThreshold = threshold, refineRounds = refineRounds)
+
+    fun clusterSeeded(
+        items: List<Item>,
+        seeds: List<FloatArray>,
+        seedThreshold: Double = SEED_THRESHOLD,
+        localThreshold: Double = DEFAULT_THRESHOLD,
+        mergeThreshold: Double = MERGE_THRESHOLD,
+        refineRounds: Int = 2,
+    ): Result {
+        if (items.isEmpty()) return Result(IntArray(0), emptyList(), emptyList())
         val vecs = items.map { SpeakerMath.normalize(it.embedding) }
-        val sums = ArrayList<FloatArray>()
+        val ns = seeds.size
+        val seedC = seeds.map { SpeakerMath.normalize(it) }
+        val sums = ArrayList<FloatArray>() // lokale Cluster: Index k ↔ Label ns + k
         val labels = IntArray(items.size)
+
+        fun center(label: Int): FloatArray? =
+            if (label < ns) seedC[label] else sums[label - ns].takeIf { s -> s.any { it != 0f } }?.let(SpeakerMath::normalize)
+
+        // 1. gierig
         for ((i, v) in vecs.withIndex()) {
             var best = -1
             var bestSim = -2.0
-            for ((k, c) in sums.withIndex()) {
-                val s = SpeakerMath.cosine(c, v)
-                if (s > bestSim) {
-                    bestSim = s
+            for (k in 0 until ns + sums.size) {
+                val c = center(k) ?: continue
+                val sim = SpeakerMath.cosine(c, v)
+                val thr = if (k < ns) seedThreshold else localThreshold
+                if (sim >= thr && sim > bestSim) {
+                    bestSim = sim
                     best = k
                 }
             }
-            if (best >= 0 && bestSim >= threshold) {
-                val c = sums[best]
-                for (d in c.indices) c[d] += v[d]
-                labels[i] = best
-            } else {
+            if (best < 0) {
                 sums += v.copyOf()
-                labels[i] = sums.lastIndex
+                labels[i] = ns + sums.lastIndex
+            } else {
+                labels[i] = best
+                if (best >= ns) sums[best - ns].let { c -> for (d in c.indices) c[d] += v[d] }
             }
         }
+
+        fun recomputeSums() {
+            for (c in sums) c.fill(0f)
+            for ((i, v) in vecs.withIndex()) {
+                if (labels[i] >= ns) sums[labels[i] - ns].let { c -> for (d in c.indices) c[d] += v[d] }
+            }
+        }
+
+        // 2. Nachzuordnung zum ähnlichsten Zentrum
         repeat(refineRounds) {
-            val centers = sums.map { SpeakerMath.normalize(it) }
+            val centers = (0 until ns + sums.size).map { center(it) }
             var changed = false
             for ((i, v) in vecs.withIndex()) {
                 var best = labels[i]
-                var bestSim = SpeakerMath.cosine(centers[best], v)
+                var bestSim = centers[best]?.let { SpeakerMath.cosine(it, v) } ?: -2.0
                 for ((k, c) in centers.withIndex()) {
-                    val s = SpeakerMath.cosine(c, v)
-                    if (s > bestSim + 1e-9) {
-                        bestSim = s
+                    if (c == null) continue
+                    val sim = SpeakerMath.cosine(c, v)
+                    if (sim > bestSim + 1e-9) {
+                        bestSim = sim
                         best = k
                     }
                 }
@@ -100,53 +149,74 @@ object SpeakerClustering {
                     changed = true
                 }
             }
-            for (c in sums) c.fill(0f)
-            for ((i, v) in vecs.withIndex()) {
-                val c = sums[labels[i]]
-                for (d in c.indices) c[d] += v[d]
-            }
+            recomputeSums()
             if (!changed) return@repeat
         }
-        // Leere Cluster entfernen und neu nummerieren
+
+        // 3. ähnliche lokale Cluster zusammenlegen (in Seeds oder ältere lokale Cluster)
+        var merged = true
+        while (merged) {
+            merged = false
+            val centers = (0 until ns + sums.size).map { k -> if (labels.contains(k)) center(k) else null }
+            for (b in ns until centers.size) {
+                val cb = centers[b] ?: continue
+                var target = -1
+                var bestSim = -2.0
+                for (a in centers.indices) {
+                    if (a == b || (a >= ns && a > b)) continue
+                    val ca = centers[a] ?: continue
+                    val sim = SpeakerMath.cosine(ca, cb)
+                    if (sim > bestSim) {
+                        bestSim = sim
+                        target = a
+                    }
+                }
+                if (target >= 0 && bestSim >= mergeThreshold) {
+                    for (i in labels.indices) if (labels[i] == b) labels[i] = target
+                    recomputeSums()
+                    merged = true
+                    break
+                }
+            }
+        }
+
+        // Ergebnis: belegte Labels neu nummerieren
         val used = labels.distinct().sorted()
         val remap = used.withIndex().associate { (newIdx, old) -> old to newIdx }
-        val newLabels = IntArray(labels.size) { remap.getValue(labels[it]) }
         val clusters = used.map { old ->
             val members = labels.indices.filter { labels[it] == old }
-            ClusterSummary(
-                centroid = SpeakerMath.normalize(sums[old]),
-                count = members.size,
-                speechMs = members.sumOf { items[it].speechMs },
-            )
+            val sum = FloatArray(vecs[0].size)
+            members.forEach { m -> vecs[m].forEachIndexed { d, x -> sum[d] += x } }
+            ClusterSummary(SpeakerMath.normalize(sum), members.size, members.sumOf { items[it].speechMs })
         }
-        return Result(newLabels, clusters)
+        return Result(
+            labels = IntArray(labels.size) { remap.getValue(labels[it]) },
+            clusters = clusters,
+            seedOf = used.map { if (it < ns) it else null },
+        )
     }
 }
 
-/** Abgleich lokaler Cluster mit den gespeicherten Profilen (vom Transcriber genutzt, nicht Teil des Vertrags). */
+/** Ein Cluster einer Datei und – falls erkannt – das bekannte Profil, zu dem er gehört. */
+data class ClusterAssignment(val cluster: ClusterSummary, val profileId: String?)
+
+/** Zugriff des Transcribers auf die Profile (nicht Teil des Vertrags). */
 interface SpeakerMatcher {
+    /** Bekannte Profile (ID, normiertes Embedding) als Start-Cluster für [SpeakerClustering.clusterSeeded]. */
+    suspend fun knownProfiles(): List<Pair<String, FloatArray>>
+
     /**
-     * Ordnet jedem Cluster einer Datei eine Profil-ID zu.
-     *
-     * - Verglichen werden Zentren mit Profilen (beides Mittelwerte). Deren Cosinus liegt systematisch höher als
-     *   Abschnitt↔Zentrum, daher eine eigene, strengere Schwelle [threshold] (gemessen: gleicher Sprecher ≥ 0,92,
-     *   verschiedene ≤ 0,75).
-     * - Eins-zu-eins je Datei: Das lokale Clustering hat bereits entschieden, dass die Cluster verschiedene
-     *   Sprecher sind; zwei Cluster derselben Datei landen nie im selben Profil, und in dieser Datei neu angelegte
-     *   Profile sind keine Kandidaten.
-     * - Ohne passendes Profil: neues Profil „Sprecher N“, aber nur ab [minNewSpeechMs] Sprache (sonst null).
+     * Übernimmt das Ergebnis einer Datei: Cluster mit [ClusterAssignment.profileId] werden in dieses Profil
+     * eingerechnet (Aliasse werden aufgelöst, falls inzwischen zusammengeführt); übrige werden neue Profile
+     * „Sprecher N“, aber nur ab [minNewSpeechMs] Sprache (sonst null). Rückgabe: Profil-ID je Cluster.
      */
-    suspend fun matchOrCreate(
-        clusters: List<ClusterSummary>,
+    suspend fun commit(
+        assignments: List<ClusterAssignment>,
         seenAtEpochMs: Long,
-        threshold: Double = PROFILE_MATCH_THRESHOLD,
         minNewSpeechMs: Long = MIN_NEW_PROFILE_SPEECH_MS,
     ): List<String?>
 
     companion object {
         const val MIN_NEW_PROFILE_SPEECH_MS = 3_000L
-
-        /** Schwelle Zentrum↔Profil (siehe oben); lokal je Abschnitt gilt [SpeakerClustering.DEFAULT_THRESHOLD]. */
-        const val PROFILE_MATCH_THRESHOLD = 0.82
     }
 }

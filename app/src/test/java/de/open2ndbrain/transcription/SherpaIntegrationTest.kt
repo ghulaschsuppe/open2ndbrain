@@ -39,8 +39,10 @@ class SherpaIntegrationTest {
             ?.filter { it.isNotBlank() }
             ?.map { l -> l.split(" ").let { Triple(it[0].toDouble(), it[1].toDouble(), it[2]) } }
         val wav2 = System.getenv("O2B_TEST_WAV2")?.let(::File)?.takeIf { it.isFile }
-        val inputs = listOf(readWav16k(wav!!) to truthOf("O2B_TEST_TRUTH"), (wav2?.let(::readWav16k) ?: readWav16k(wav)) to (if (wav2 != null) truthOf("O2B_TEST_TRUTH2") else truthOf("O2B_TEST_TRUTH")))
-        println("Runde 2 mit ${if (wav2 != null) "zweiter Aufnahme ${wav2.name}" else "derselben Datei"}")
+        val first = readWav16k(wav!!) to truthOf("O2B_TEST_TRUTH")
+        // Runde 2: zweite Aufnahme (falls vorhanden), Runde 3: wieder die erste Datei
+        val inputs = listOf(first, (wav2?.let(::readWav16k) ?: first.first) to (if (wav2 != null) truthOf("O2B_TEST_TRUTH2") else first.second), first)
+        println("Runde 2 mit ${if (wav2 != null) "zweiter Aufnahme ${wav2.name}" else "derselben Datei"}, Runde 3 mit der ersten Datei")
         val vad = File(models, "silero_vad.onnx")
         val speakersDir = Files.createTempDirectory("spk").toFile()
         val repo = FileSpeakerRepository(speakersDir)
@@ -54,11 +56,12 @@ class SherpaIntegrationTest {
                     asrSegmenter = { SherpaSegmenter(vad, minSilenceSec = 0.5f, maxSpeechSec = 25f) },
                     speakerSegmenter = { SherpaSegmenter(vad, minSilenceSec = 0.25f, maxSpeechSec = 8f) },
                     embedder = emb,
-                    matchClusters = { c -> runBlocking { repo.matchOrCreate(c, start) } },
+                    speakers = repo,
+                    seenAtEpochMs = start,
                 )
-                // Runde 1: neue Profile; Runde 2: dieselbe Datei erneut → Wiedererkennung, keine neuen Profile
+                // Runde 1: neue Profile; Runde 2/3: Wiedererkennung über Dateien, keine neuen Profile
                 var profilesAfterFirst = 0
-                for (round in 1..2) {
+                for (round in 1..3) {
                     val (pcm, truth) = inputs[round - 1]
                     val source = sourceOf(pcm)
                     val mapper = FileTimeMapper(listOf(RecordingSidecar.Segment(0, start, pcm.size / 16L)), start)
@@ -75,7 +78,7 @@ class SherpaIntegrationTest {
                     println("Sprecherprofile: ${speakers.size} → " + speakers.joinToString { "Nr. ${it.number}: ${it.totalSpeechMs / 1000} s" })
                     assertTrue("keine Äußerungen", result.utterances.isNotEmpty())
                     if (round == 1) profilesAfterFirst = speakers.size
-                    else assertEquals("Wiedererkennung: keine neuen Profile in Runde 2", profilesAfterFirst, speakers.size)
+                    else assertEquals("Wiedererkennung: keine neuen Profile in Runde $round", profilesAfterFirst, speakers.size)
                     if (truth != null) {
                         // Mehrheitszuordnung Sprecher-ID → wahrer Sprecher, Anteil richtig zugeordneter Äußerungs-Sekunden
                         val pairs = result.utterances.mapNotNull { u ->

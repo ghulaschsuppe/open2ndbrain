@@ -9,7 +9,6 @@ import de.open2ndbrain.core.Transcriber
 import de.open2ndbrain.core.TranscriberConfig
 import de.open2ndbrain.core.Transcript
 import de.open2ndbrain.speakers.SpeakerMatcher
-import kotlinx.coroutines.runBlocking
 import java.io.IOException
 
 /**
@@ -52,10 +51,8 @@ class SherpaTranscriber(
                 null
             },
             embedder = emb,
-            matchClusters = { clusters ->
-                if (matcher == null || clusters.isEmpty()) List(clusters.size) { null }
-                else runBlocking { matcher.matchOrCreate(clusters, seenAt) }
-            },
+            speakers = matcher,
+            seenAtEpochMs = seenAt,
         )
         val expected = msToSamples(recording.durationMs.takeIf { it > 0 } ?: 3_600_000L)
         val result = try {

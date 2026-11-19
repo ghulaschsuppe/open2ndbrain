@@ -1,8 +1,10 @@
 package de.open2ndbrain.transcription
 
 import de.open2ndbrain.core.Utterance
-import de.open2ndbrain.speakers.ClusterSummary
+import de.open2ndbrain.speakers.ClusterAssignment
 import de.open2ndbrain.speakers.SpeakerClustering
+import de.open2ndbrain.speakers.SpeakerMatcher
+import kotlinx.coroutines.runBlocking
 
 /** Sprachabschnitts-Erkennung (VAD) über einen Strom; eine Instanz pro Datei. */
 internal interface Segmenter {
@@ -31,15 +33,18 @@ internal class PipelineResult(val utterances: List<Utterance>, val decodedSample
  * 1. Dekodieren → Silero-VAD grob (ASR) und fein (Sprecher) → nur Bereichsgrenzen merken.
  * 2. ASR-Blöcke planen ([BlockPlanner]); erneut dekodieren, Blöcke und Sprecherabschnitte einsammeln
  *    ([RangeCollector]), sobald vollständig: ASR bzw. Embedding.
- * 3. Sprecher lokal clustern, Cluster global abgleichen ([matchClusters]), Tokens zuordnen, Äußerungen bilden.
+ * 3. Sprecher clustern – mit den bekannten Profilen als Start-Cluster ([SpeakerClustering.clusterSeeded]) –,
+ *    Ergebnis in die Profile übernehmen ([SpeakerMatcher.commit]), Tokens zuordnen, Äußerungen bilden.
  */
 internal class TranscriptionPipeline(
     private val recognizer: Recognizer,
     private val asrSegmenter: () -> Segmenter,
     private val speakerSegmenter: (() -> Segmenter)?,
     private val embedder: Embedder?,
-    private val matchClusters: (List<ClusterSummary>) -> List<String?>,
-    private val clusterThreshold: Double = SpeakerClustering.DEFAULT_THRESHOLD,
+    /** null → Sprecher werden nur innerhalb der Datei unterschieden (keine IDs). */
+    private val speakers: SpeakerMatcher?,
+    /** Zeitpunkt für `lastSeen` der Profile (i. d. R. Ende der Aufnahme). */
+    private val seenAtEpochMs: Long = System.currentTimeMillis(),
 ) {
     private class StopReading : RuntimeException() {
         override fun fillInStackTrace(): Throwable = this
@@ -129,11 +134,13 @@ internal class TranscriptionPipeline(
     /** Liefert eine Funktion Dateizeit (ms) → Sprecher-ID. */
     private fun assignSpeakers(segs: List<SampleRange>, embeddings: Map<Int, FloatArray>): (Long) -> String? {
         val idx = embeddings.keys.sorted()
-        val result = SpeakerClustering.cluster(
+        val known = speakers?.let { runBlocking { it.knownProfiles() } }.orEmpty()
+        val result = SpeakerClustering.clusterSeeded(
             idx.map { SpeakerClustering.Item(embeddings.getValue(it), samplesToMs(segs[it].length)) },
-            clusterThreshold,
+            known.map { it.second },
         )
-        val ids = matchClusters(result.clusters)
+        val assignments = result.clusters.mapIndexed { k, c -> ClusterAssignment(c, result.seedOf[k]?.let { known[it].first }) }
+        val ids = speakers?.let { runBlocking { it.commit(assignments, seenAtEpochMs) } } ?: List(assignments.size) { null }
         val segIds = arrayOfNulls<String>(segs.size)
         idx.forEachIndexed { k, segIndex -> segIds[segIndex] = ids.getOrNull(result.labels[k]) }
         // Kurze Abschnitte (ohne eigenes Embedding): Sprecher der Nachbarn übernehmen – wenn beide Nachbarn

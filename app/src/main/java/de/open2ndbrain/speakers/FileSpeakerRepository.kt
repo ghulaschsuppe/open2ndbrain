@@ -70,36 +70,31 @@ class FileSpeakerRepository(
 
     override suspend fun delete(id: String) = edit { s -> s.copy(speakers = s.speakers.filter { it.id != id }) }
 
-    override suspend fun matchOrCreate(
-        clusters: List<ClusterSummary>,
+    override suspend fun knownProfiles(): List<Pair<String, FloatArray>> =
+        ensureLoaded().speakers.map { it.id to it.embedding.toFloatArray() }
+
+    override suspend fun commit(
+        assignments: List<ClusterAssignment>,
         seenAtEpochMs: Long,
-        threshold: Double,
         minNewSpeechMs: Long,
     ): List<String?> {
-        val result = arrayOfNulls<String>(clusters.size)
+        val result = arrayOfNulls<String>(assignments.size)
         edit { start ->
-            val existing = start.speakers
-            // Alle Paare über der Schwelle, bestes zuerst; jedes Profil und jeder Cluster höchstens einmal
-            val pairs = ArrayList<Triple<Int, Int, Double>>()
-            clusters.forEachIndexed { ci, c ->
-                existing.forEachIndexed { pi, p ->
-                    val sim = SpeakerMath.cosine(p.embedding.toFloatArray(), c.centroid)
-                    if (sim >= threshold) pairs += Triple(ci, pi, sim)
+            val updated = start.speakers.toMutableList()
+            assignments.forEachIndexed { i, a ->
+                val pid = a.profileId ?: return@forEachIndexed
+                // Seit dem Abruf evtl. zusammengeführt (Alias) oder gelöscht
+                val idx = updated.indexOfFirst { it.id == pid || pid in it.aliases }
+                if (idx >= 0) {
+                    updated[idx] = absorb(updated[idx], a.cluster, seenAtEpochMs)
+                    result[i] = updated[idx].id
                 }
-            }
-            val usedProfiles = HashSet<Int>()
-            val updated = existing.toMutableList()
-            for ((ci, pi, _) in pairs.sortedByDescending { it.third }) {
-                if (result[ci] != null || pi in usedProfiles) continue
-                usedProfiles += pi
-                updated[pi] = absorb(existing[pi], clusters[ci], seenAtEpochMs)
-                result[ci] = existing[pi].id
             }
             var next = start.nextNumber
             // Neue Profile: große Cluster zuerst (bekommen die kleineren Nummern)
-            for (ci in clusters.indices.sortedByDescending { clusters[it].speechMs }) {
-                val c = clusters[ci]
-                if (result[ci] != null || c.speechMs < minNewSpeechMs) continue
+            for (i in assignments.indices.sortedByDescending { assignments[it].cluster.speechMs }) {
+                val c = assignments[i].cluster
+                if (result[i] != null || c.speechMs < minNewSpeechMs) continue
                 val p = SpeakerProfile(
                     id = UUID.randomUUID().toString(),
                     number = next++,
@@ -110,7 +105,7 @@ class FileSpeakerRepository(
                     lastSeenEpochMs = seenAtEpochMs,
                 )
                 updated += p
-                result[ci] = p.id
+                result[i] = p.id
             }
             start.copy(nextNumber = next, speakers = updated)
         }
