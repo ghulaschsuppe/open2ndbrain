@@ -9,11 +9,21 @@ import de.open2ndbrain.core.ModelState
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.settings.AppSettings
 import de.open2ndbrain.work.TranscriptionRunStat
-import de.open2ndbrain.ui.settings.ModelRow
-import de.open2ndbrain.ui.settings.SettingDivider
 import de.open2ndbrain.ui.settings.SettingsActions
 import de.open2ndbrain.ui.settings.SettingsContent
 import java.io.File
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.ui.unit.dp
+import de.open2ndbrain.ui.recordings.RetranscribeSheetContent
+import de.open2ndbrain.ui.settings.AsrModelsContent
+import de.open2ndbrain.ui.settings.LinkSetting
+import de.open2ndbrain.ui.settings.ModelItemUi
+import de.open2ndbrain.ui.settings.ModelsActions
+import de.open2ndbrain.ui.settings.ModelsUi
 import de.open2ndbrain.ui.onboarding.OnboardingScreen
 import de.open2ndbrain.ui.record.RecordActions
 import de.open2ndbrain.ui.record.RecordContent
@@ -46,6 +56,7 @@ class ScreensScreenshotTest {
     @Composable
     private fun Now() = RecordContent(
         RecordSamples.recording, RecordSamples.meeting, RecordSamples.transcribing, null, RecordActions(onTranscribeNow = {}),
+        modelHint = ModelCatalog.DE_FASTCONFORMER,
         runs = listOf(TranscriptionRunStat(0, "2025-11-19_12-00.ogg", 1_800_000, 252_000, 3_400, 4, "service", "Pixel 8 (Tensor G3)")),
     )
 
@@ -133,6 +144,55 @@ class ScreensScreenshotTest {
     }
 
     @Composable
+    private fun Models() = AsrModelsContent(
+        ui = ModelsUi(
+            asr = listOf(
+                ModelItemUi(ModelCatalog.DE_FASTCONFORMER, ModelState.Installed(File("/x"))),
+                ModelItemUi(ModelCatalog.CANARY_180M_DE, ModelState.Downloading(88_000_000, 207_170_046)),
+                ModelItemUi(ModelCatalog.PARAKEET_V3, ModelState.Installed(File("/x"))),
+                ModelItemUi(ModelCatalog.WHISPER_SMALL, ModelState.NotInstalled),
+            ),
+            others = listOf(
+                ModelItemUi(ModelCatalog.SILERO_VAD, ModelState.Installed(File("/x"))),
+                ModelItemUi(ModelCatalog.WESPEAKER_RESNET34, ModelState.NotInstalled),
+            ),
+            activeAsrId = ModelCatalog.DE_FASTCONFORMER.id,
+        ),
+        actions = ModelsActions(onActivate = {}),
+        onBack = {},
+    )
+
+    @Config(qualifiers = "w400dp-h3000dp-xhdpi")
+    @Test fun modelleDunkel() = compose.snapshot("8-spracherkennung", dark = true) { Models() }
+
+    @Config(qualifiers = "w400dp-h3000dp-xhdpi")
+    @Test fun modelleHell() = compose.snapshot("8-spracherkennung", dark = false) { Models() }
+
+    @Test fun neuTranskribieren() = compose.snapshot("9-neu-transkribieren", dark = true) {
+        androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize()) {
+            Detail()
+            androidx.compose.foundation.layout.Box(
+                androidx.compose.ui.Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)),
+            )
+            androidx.compose.material3.Surface(
+                modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter),
+                shape = androidx.compose.material3.MaterialTheme.shapes.extraLarge,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow,
+            ) {
+                androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.padding(top = 20.dp)) {
+                    RetranscribeSheetContent(
+                        installed = listOf(ModelCatalog.DE_FASTCONFORMER, ModelCatalog.CANARY_180M_DE, ModelCatalog.PARAKEET_V3),
+                        currentModelId = ModelCatalog.PARAKEET_V3.id,
+                        onPick = {},
+                        onOpenModels = {},
+                        onCancel = {},
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun Settings() = SettingsContent(
         settings = AppSettings(),
         speakerModelInstalled = true,
@@ -140,9 +200,7 @@ class ScreensScreenshotTest {
         dynamicColor = false,
         actions = SettingsActions(),
         models = {
-            ModelRow(ModelCatalog.PARAKEET_V3, ModelState.Installed(File("/x")), 0, false, {}, {}, {})
-            SettingDivider()
-            ModelRow(ModelCatalog.WESPEAKER_RESNET34, ModelState.Downloading(19_000_000, 26_500_000), 0, false, {}, {}, {})
+            LinkSetting(Icons.Filled.RecordVoiceOver, "Spracherkennung", "Geladen: Deutsch – schnell (FastConformer)") {}
         },
     )
 

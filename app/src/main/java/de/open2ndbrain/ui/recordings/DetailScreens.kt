@@ -63,7 +63,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import de.open2ndbrain.O2bApp
 import de.open2ndbrain.R
+import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.ModelSpec
+import de.open2ndbrain.core.ModelState
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.ui.platform.LocalContext
 import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MarkerType
 import de.open2ndbrain.core.RecordingFile
@@ -106,6 +113,11 @@ fun RecordingDetail(recording: RecordingFile, vm: RecordingsViewModel, modifier:
     var menu by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var editBookmark by remember { mutableStateOf<Marker?>(null) }
+    var pickModel by remember { mutableStateOf(false) }
+    val installedAsr = rememberInstalledAsrModels()
+    // TODO(App-Agent): mit ModelsViewModel/RecordingsViewModel „Mit diesem Modell neu transkribieren“ verdrahten.
+    // Solange null, bleibt der Menüpunkt ausgeblendet (nicht mit dem aktiven Modell verwechseln).
+    val retranscribeWith: ((String) -> Unit)? = null
     val audioExists = recording.audio.exists()
     val bookmarks = remember(markers, recording) { MarkerLogic.bookmarksIn(recording, markers) }
     val badge = data?.badges?.get(recording.audio.path) ?: TranscriptBadge.None
@@ -146,6 +158,16 @@ fun RecordingDetail(recording: RecordingFile, vm: RecordingsViewModel, modifier:
                     vm.retranscribe(recording)
                 },
             )
+            if (retranscribeWith != null && installedAsr.isNotEmpty()) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.retranscribe_with)) },
+                    leadingIcon = { Icon(Icons.Filled.Tune, contentDescription = null) },
+                    onClick = {
+                        menu = false
+                        pickModel = true
+                    },
+                )
+            }
             if (audioExists) {
                 DropdownMenuItem(
                     text = { Text(stringResource(R.string.delete_audio)) },
@@ -166,6 +188,43 @@ fun RecordingDetail(recording: RecordingFile, vm: RecordingsViewModel, modifier:
         }, onDismiss = { confirmDelete = false })
     }
     editBookmark?.let { b -> MarkerEditDialog(b, vm, onDismiss = { editBookmark = null }) }
+    if (pickModel && retranscribeWith != null) {
+        RetranscribeSheet(
+            installed = installedAsr,
+            currentModelId = transcript?.asrModelId,
+            onPick = retranscribeWith,
+            onOpenModels = null,
+            onDismiss = { pickModel = false },
+        )
+    }
+}
+
+/** Installierte Spracherkennungsmodelle (für das Auswahl-Sheet). */
+@Composable
+fun rememberInstalledAsrModels(): List<ModelSpec> {
+    val context = LocalContext.current
+    val states by remember { (context.applicationContext as O2bApp).container.modelManager.states }.collectAsStateWithLifecycle()
+    return remember(states) { ModelCatalog.asrModels.filter { states[it.id] is ModelState.Installed } }
+}
+
+/** Unauffällige Herkunftsangabe: „Transkribiert mit Deutsch – schnell · 19.11.2025, 15:02“. */
+@Composable
+private fun ModelProvenance(t: Transcript) {
+    val name = ModelCatalog.byId(t.asrModelId)?.displayName ?: t.asrModelId
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Filled.Memory,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            stringResource(R.string.transcript_made_with, name, Formatters.dateTime(t.createdAtEpochMs)),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 private val LONG_DATE = DateTimeFormatter.ofPattern("EEEE, d. MMMM yyyy", Locale.GERMAN)
@@ -224,6 +283,7 @@ fun RecordingDetailContent(
                         }
                         if (participants.isNotEmpty()) ParticipantsRow(participants)
                         if (bookmarks.isNotEmpty()) BookmarkChips(bookmarks, onBookmarkClick)
+                        transcript?.let { ModelProvenance(it) }
                         if (!audioExists) InfoNote(stringResource(R.string.detail_audio_deleted))
                     }
                 },
@@ -303,6 +363,7 @@ fun MeetingDetailContent(
     onSeek: (Long) -> Unit,
     onClosePlayer: () -> Unit,
     modifier: Modifier = Modifier,
+    onRetranscribeWith: (() -> Unit)? = null,
 ) {
     val extra = O2bTheme.extra
     val end = meeting.endEpochMs
@@ -314,6 +375,9 @@ fun MeetingDetailContent(
                 subtitle = longDate(meeting.startEpochMs),
                 onBack = onBack,
             ) {
+                if (onRetranscribeWith != null) {
+                    IconButton(onClick = onRetranscribeWith) { Icon(Icons.Filled.Tune, stringResource(R.string.retranscribe_with)) }
+                }
                 IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, stringResource(R.string.meeting_title_edit)) }
             }
             TranscriptList(

@@ -48,6 +48,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,16 +82,29 @@ import de.open2ndbrain.ui.theme.Spacing
 import de.open2ndbrain.ui.theme.ThemePreferences
 
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier, vm: SettingsViewModel = viewModel()) {
+fun SettingsScreen(
+    modifier: Modifier = Modifier,
+    openModels: Boolean = false,
+    onModelsOpened: () -> Unit = {},
+    vm: SettingsViewModel = viewModel(),
+) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
+    // Sprung aus dem Jetzt-Tab („Besseres Modell verfügbar“)
+    LaunchedEffect(openModels) {
+        if (openModels) {
+            page = SettingsPage.Models
+            onModelsOpened()
+        }
+    }
     BackHandler(enabled = page != SettingsPage.Main) { page = SettingsPage.Main }
     when (page) {
         SettingsPage.Licenses -> LicensesScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
+        SettingsPage.Models -> AsrModelsScreen(vm, onBack = { page = SettingsPage.Main }, modifier = modifier)
         SettingsPage.Main -> SettingsMain(modifier, vm, onOpen = { page = it })
     }
 }
 
-private enum class SettingsPage { Main, Licenses }
+private enum class SettingsPage { Main, Licenses, Models }
 
 @Composable
 private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (SettingsPage) -> Unit) {
@@ -120,7 +134,7 @@ private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (Set
             onDynamicColor = themePrefs::setDynamicColor,
             onOpenLicenses = { onOpen(SettingsPage.Licenses) },
         ),
-        models = { ModelsBlock(vm) },
+        models = { ModelsLink(vm, onOpen = { onOpen(SettingsPage.Models) }) },
         modifier = modifier,
     )
 }

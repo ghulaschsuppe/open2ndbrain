@@ -76,6 +76,12 @@ import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MarkerType
 import de.open2ndbrain.core.MicPreference
 import de.open2ndbrain.core.TranscriptionStatus
+import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.ModelSpec
+import de.open2ndbrain.core.ModelState
+import de.open2ndbrain.O2bApp
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.Star
 import de.open2ndbrain.work.TranscriptionRunStat
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderNotifications
@@ -97,12 +103,15 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel()) {
+fun RecordScreen(modifier: Modifier = Modifier, onOpenModels: () -> Unit = {}, vm: RecordViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
     val meeting by vm.meeting.collectAsStateWithLifecycle()
     val transcription by vm.transcription.collectAsStateWithLifecycle()
     val runs by vm.transcriptionStats.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val modelStates by remember { (context.applicationContext as O2bApp).container.modelManager.states }.collectAsStateWithLifecycle()
+    var hintDismissed by rememberSaveable { mutableStateOf(false) }
+    val modelHint = if (hintDismissed) null else betterModelHint(modelStates)
     var problem by remember { mutableStateOf<Int?>(null) }
     var showMicDialog by remember { mutableStateOf(false) }
 
@@ -123,6 +132,7 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
         meeting = meeting,
         transcription = transcription,
         problem = problem,
+        modelHint = modelHint,
         modifier = modifier,
         runs = runs,
         actions = RecordActions(
@@ -141,6 +151,8 @@ fun RecordScreen(modifier: Modifier = Modifier, vm: RecordViewModel = viewModel(
             onBookmark = { vm.bookmark() },
             onOpenAppSettings = { SystemSettings.openAppDetails(context) },
             onTranscribeNow = vm::transcribeNow,
+            onOpenModels = onOpenModels,
+            onDismissModelHint = { hintDismissed = true },
         ),
     )
 
@@ -170,6 +182,8 @@ class RecordActions(
     val onBookmark: () -> Unit = {},
     val onOpenAppSettings: () -> Unit = {},
     val onTranscribeNow: (() -> Unit)? = null,
+    val onOpenModels: () -> Unit = {},
+    val onDismissModelHint: () -> Unit = {},
 )
 
 /** „Jetzt“: Aufnahme-Knopf als Hero, Status- und Mikrofon-Chip, Kennzahlen, Meeting/Merken, Transkription. */
@@ -182,6 +196,7 @@ fun RecordContent(
     actions: RecordActions,
     modifier: Modifier = Modifier,
     runs: List<TranscriptionRunStat> = emptyList(),
+    modelHint: ModelSpec? = null,
 ) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         ContentWidth {
@@ -195,6 +210,8 @@ fun RecordContent(
                     verticalArrangement = Arrangement.spacedBy(Spacing.md),
                 ) {
                     HeroSection(state, actions)
+
+                    if (modelHint != null) ModelHintCard(modelHint, actions.onOpenModels, actions.onDismissModelHint)
 
                     AnimatedVisibility(visible = problem != null) {
                         problem?.let { ProblemCard(it, actions.onOpenAppSettings) }
@@ -344,6 +361,40 @@ private fun PauseControls(state: RecordUiState, actions: RecordActions) {
                 Spacer(Modifier.width(Spacing.xs))
                 Text(stringResource(R.string.action_pause_15))
             }
+        }
+    }
+}
+
+/**
+ * Empfohlenes Spracherkennungsmodell, wenn es noch nicht geladen ist (und gerade nicht lädt).
+ * Sobald das ModelsViewModel das aktive Modell liefert, kann hier zusätzlich „aktiv ≠ empfohlen“ geprüft werden.
+ */
+fun betterModelHint(states: Map<String, ModelState>): ModelSpec? =
+    ModelCatalog.asrModels.firstOrNull { it.recommended }?.takeIf { states[it.id] == null || states[it.id] == ModelState.NotInstalled }
+
+@Composable
+private fun ModelHintCard(spec: ModelSpec, onOpen: () -> Unit, onDismiss: () -> Unit) {
+    O2bCard(
+        Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+        border = null,
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Filled.Star, contentDescription = null, tint = O2bTheme.extra.meeting)
+            Spacer(Modifier.width(Spacing.sm))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.model_hint_title, spec.displayName), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    stringResource(R.string.model_hint_text, Formatters.bytes(spec.sizeBytes)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = Spacing.xs), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.model_hint_later)) }
+            Spacer(Modifier.width(Spacing.xs))
+            FilledTonalButton(onClick = onOpen) { Text(stringResource(R.string.model_hint_open)) }
         }
     }
 }

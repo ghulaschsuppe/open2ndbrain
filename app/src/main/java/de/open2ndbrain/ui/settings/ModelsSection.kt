@@ -53,89 +53,26 @@ import de.open2ndbrain.ui.theme.O2bTheme
 import de.open2ndbrain.ui.theme.Spacing
 import de.open2ndbrain.ui.theme.tabular
 
-/** Gesamtgröße aller Modelle (für Hinweise zum Datenvolumen). */
-val ALL_MODELS_BYTES: Long get() = ModelCatalog.all.sumOf { it.sizeBytes }
+/** Größe der empfohlenen Grundausstattung (empfohlenes Spracherkennungsmodell, VAD, Sprechererkennung). */
+val ALL_MODELS_BYTES: Long get() =
+    (ModelCatalog.asrModels.filter { it.recommended } + ModelCatalog.all.filter { it.kind != ModelKind.Asr }).sumOf { it.sizeBytes }
 
-/** Sprachmodelle: Liste mit Download/Abbrechen/Löschen, Fortschritt und Import. */
+/** Eintrag in den Einstellungen: öffnet die Seite „Spracherkennung“, mit kurzer Zusammenfassung. */
 @Composable
-fun ModelsBlock(vm: SettingsViewModel) {
+fun ModelsLink(vm: SettingsViewModel, onOpen: () -> Unit) {
     val states by vm.modelStates.collectAsStateWithLifecycle()
-    val present by vm.presentBytes.collectAsStateWithLifecycle()
-    val waiting by vm.waitingForNetwork.collectAsStateWithLifecycle()
-    val importState by vm.importState.collectAsStateWithLifecycle()
-    var askDownload by remember { mutableStateOf<ModelSpec?>(null) }
-    var askDelete by remember { mutableStateOf<ModelSpec?>(null) }
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        vm.import(uris)
-    }
-
-    Row(Modifier.padding(horizontal = Spacing.md, vertical = Spacing.xs), verticalAlignment = Alignment.Top) {
-        Icon(Icons.Filled.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(Spacing.sm))
-        Text(
-            stringResource(R.string.models_volume_hint, Formatters.bytes(ALL_MODELS_BYTES)),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-    ModelCatalog.all.forEach { spec ->
-        SettingDivider()
-        ModelRow(
-            spec = spec,
-            state = states[spec.id] ?: ModelState.NotInstalled,
-            presentBytes = present[spec.id] ?: 0L,
-            waitingForNetwork = spec.id in waiting,
-            onDownload = { askDownload = spec },
-            onCancel = { vm.cancel(spec.id) },
-            onDelete = { askDelete = spec },
-        )
-    }
-    SettingDivider()
-    SettingHeader(Icons.Filled.FileOpen, stringResource(R.string.models_import_title), stringResource(R.string.models_import_hint), tint = MaterialTheme.colorScheme.secondary)
-    Column(Modifier.padding(start = 72.dp, end = Spacing.md, bottom = Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-        when (val st = importState) {
-            is ImportState.Running -> {
-                Text(stringResource(R.string.models_import_running, st.displayName, st.index, st.count), style = MaterialTheme.typography.bodySmall)
-                LinearProgressIndicator(Modifier.fillMaxWidth(), strokeCap = StrokeCap.Round)
-            }
-            is ImportState.Done -> {
-                st.results.forEach { r -> Text(importResultText(r), style = MaterialTheme.typography.bodySmall) }
-                TextButton(onClick = vm::clearImport) { Text(stringResource(R.string.close)) }
-            }
-            null -> OutlinedButton(onClick = { importLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.models_import_button))
-            }
-        }
-    }
-
-    askDownload?.let { spec ->
-        DownloadDialog(
-            sizeBytes = spec.sizeBytes - (present[spec.id] ?: 0L),
-            onWifi = {
-                vm.download(spec.id, unmeteredOnly = true)
-                askDownload = null
-            },
-            onAnyNetwork = {
-                vm.download(spec.id, unmeteredOnly = false)
-                askDownload = null
-            },
-            onDismiss = { askDownload = null },
-        )
-    }
-    askDelete?.let { spec ->
-        AlertDialog(
-            onDismissRequest = { askDelete = null },
-            title = { Text(stringResource(R.string.models_delete_title)) },
-            text = { Text(stringResource(R.string.models_delete_text, spec.displayName)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    vm.deleteModel(spec.id)
-                    askDelete = null
-                }) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { askDelete = null }) { Text(stringResource(R.string.cancel)) } },
-        )
-    }
+    val installed = ModelCatalog.asrModels.filter { states[it.id] is ModelState.Installed }
+    val downloading = ModelCatalog.all.any { states[it.id] is ModelState.Downloading || states[it.id] == ModelState.Verifying }
+    LinkSetting(
+        Icons.Filled.RecordVoiceOver,
+        stringResource(R.string.asr_title),
+        when {
+            downloading -> stringResource(R.string.models_link_downloading)
+            installed.isEmpty() -> stringResource(R.string.models_link_none)
+            else -> stringResource(R.string.models_link_installed, installed.joinToString(", ") { it.displayName })
+        },
+        onClick = onOpen,
+    )
 }
 
 /** Eine Modellzeile im App-Stil: Icon nach Art, Name mit Plakette, Größe/Sprachen, Beschreibung, Aktion. */
@@ -265,13 +202,4 @@ fun DownloadDialog(sizeBytes: Long, onWifi: () -> Unit, onAnyNetwork: () -> Unit
             }
         },
     )
-}
-
-@Composable
-private fun importResultText(r: ImportResult): String = when (r.outcome) {
-    ImportResult.Outcome.Imported -> stringResource(R.string.models_import_ok, r.displayName, r.modelName.orEmpty())
-    ImportResult.Outcome.AlreadyPresent -> stringResource(R.string.models_import_present, r.displayName)
-    ImportResult.Outcome.WrongChecksum -> stringResource(R.string.models_import_bad, r.displayName)
-    ImportResult.Outcome.Unknown -> stringResource(R.string.models_import_unknown, r.displayName)
-    ImportResult.Outcome.Error -> stringResource(R.string.models_import_error, r.displayName)
 }

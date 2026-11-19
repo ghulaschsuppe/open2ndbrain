@@ -100,6 +100,20 @@ private enum class Tab(@param:StringRes val label: Int, val icon: ImageVector, v
 @Composable
 private fun MainScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.Now) }
+    var openModels by rememberSaveable { mutableStateOf(false) }
+    val content: @Composable (Modifier) -> Unit = { m ->
+        TabContent(
+            tab = tab,
+            openModels = openModels,
+            onSelect = { tab = it },
+            onOpenModels = {
+                openModels = true
+                tab = Tab.Settings
+            },
+            onModelsOpened = { openModels = false },
+            modifier = m,
+        )
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         if (wide) {
@@ -121,8 +135,7 @@ private fun MainScaffold() {
                         )
                     }
                 }
-                TabContent(
-                    tab,
+                content(
                     Modifier
                         .weight(1f)
                         .windowInsetsPadding(WindowInsets.systemBars),
@@ -148,14 +161,21 @@ private fun MainScaffold() {
                     }
                 },
             ) { padding ->
-                TabContent(tab, Modifier.padding(padding).consumeWindowInsets(padding))
+                content(Modifier.padding(padding).consumeWindowInsets(padding))
             }
         }
     }
 }
 
 @Composable
-private fun TabContent(tab: Tab, modifier: Modifier) {
+private fun TabContent(
+    tab: Tab,
+    openModels: Boolean,
+    onSelect: (Tab) -> Unit,
+    onOpenModels: () -> Unit,
+    onModelsOpened: () -> Unit,
+    modifier: Modifier,
+) {
     AnimatedContent(
         targetState = tab,
         transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
@@ -163,10 +183,10 @@ private fun TabContent(tab: Tab, modifier: Modifier) {
         modifier = modifier,
     ) { t ->
         when (t) {
-            Tab.Now -> RecordScreen()
-            Tab.Timeline -> RecordingsScreen()
+            Tab.Now -> RecordScreen(onOpenModels = onOpenModels)
+            Tab.Timeline -> RecordingsScreen(onStartRecording = { onSelect(Tab.Now) })
             Tab.Speakers -> SpeakersScreen()
-            Tab.Settings -> SettingsScreen()
+            Tab.Settings -> SettingsScreen(openModels = openModels, onModelsOpened = onModelsOpened)
         }
     }
 }
