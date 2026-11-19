@@ -162,7 +162,7 @@
     <string name="download_failed">Download fehlgeschlagen</string>
 
     <!-- Phase 2: Transkription -->
-    <string name="transcription_model_broken">Sprachmodell nicht ladbar – bitte in den Einstellungen löschen und neu laden.</string>
+    <string name="transcription_model_broken">Sprachmodell nicht ladbar – in Einstellungen → Sprachmodelle prüfen.</string>
     <string name="transcription_oom">Zu wenig Arbeitsspeicher für die Transkription.</string>
     <string name="transcription_notif_title">Transkription läuft</string>
     <plurals name="transcription_notif_text">

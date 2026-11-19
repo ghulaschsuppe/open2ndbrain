@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import de.open2ndbrain.O2bApp
 import de.open2ndbrain.R
 import de.open2ndbrain.core.ModelCatalog
+import de.open2ndbrain.core.ModelLoadException
 import de.open2ndbrain.core.RecordingFile
 import de.open2ndbrain.core.Transcriber
 import de.open2ndbrain.core.TranscriberConfig
@@ -49,6 +50,8 @@ class TranscriptionWorker(context: Context, params: WorkerParameters) : Coroutin
         val speakerFile = if (settings.speakerRecognition) c.modelManager.installedFile(ModelCatalog.WESPEAKER_RESNET34) else null
         val config = TranscriberConfig(asrDir, vadFile, speakerFile, settings.transcriptionThreads)
 
+        // Einträge für inzwischen gelöschte Audiodateien entfernen.
+        withContext(Dispatchers.IO) { c.transcriptionFailures.pruneMissing() }
         var transcriber: Transcriber? = null
         try {
             while (!isStopped) {
@@ -71,22 +74,23 @@ class TranscriptionWorker(context: Context, params: WorkerParameters) : Coroutin
                     throw e
                 } catch (e: InterruptedException) {
                     throw CancellationException("unterbrochen")
-                } catch (e: IllegalStateException) {
-                    // Modell nicht ladbar → ganzen Lauf beenden, Datei nicht als fehlerhaft zählen.
+                } catch (e: ModelLoadException) {
+                    // Nur dieser Fehler bedeutet „Modell defekt/fehlt“ → ganzen Lauf beenden, Datei nicht zählen.
                     Log.e(TAG, "Modell nicht ladbar", e)
                     status.update { it.copy(lastError = applicationContext.getString(R.string.transcription_model_broken)) }
                     break
                 } catch (e: IOException) {
                     Log.w(TAG, "Transkription von ${rec.audio.name} fehlgeschlagen", e)
-                    c.transcriptionFailures.increment(rec.audio)
+                    recordFailure(rec)
                     status.update { it.copy(lastError = e.message) }
                 } catch (e: OutOfMemoryError) {
                     Log.e(TAG, "Zu wenig Arbeitsspeicher", e)
                     status.update { it.copy(lastError = applicationContext.getString(R.string.transcription_oom)) }
                     break
                 } catch (e: Exception) {
+                    // u. a. IllegalStateException: Fehler dieser Datei, nicht des Modells.
                     Log.w(TAG, "Transkription von ${rec.audio.name} fehlgeschlagen", e)
-                    c.transcriptionFailures.increment(rec.audio)
+                    recordFailure(rec)
                     status.update { it.copy(lastError = e.message ?: e.javaClass.simpleName) }
                 }
             }
@@ -96,6 +100,12 @@ class TranscriptionWorker(context: Context, params: WorkerParameters) : Coroutin
             c.transcriptionScheduler.refreshStatus()
         }
         return Result.success()
+    }
+
+    /** Fehlversuch zählen – außer die Datei wurde inzwischen gelöscht (dann gibt es nichts mehr zu wiederholen). */
+    private fun recordFailure(rec: RecordingFile) {
+        val failures = container.transcriptionFailures
+        if (rec.audio.exists()) failures.increment(rec.audio) else failures.clear(rec.audio)
     }
 
     /** Nächste Datei (Meetings zuerst, dauerhaft fehlerhafte übersprungen) und Anzahl insgesamt offener Dateien. */

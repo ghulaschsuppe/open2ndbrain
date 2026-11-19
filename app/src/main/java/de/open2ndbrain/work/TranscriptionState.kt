@@ -92,6 +92,17 @@ class TranscriptionFailures(private val file: File) {
         save()
     }
 
+    /** Einträge für Audiodateien entfernen, die es nicht mehr gibt (gelöscht, Aufbewahrung). */
+    fun pruneMissing(exists: (String) -> Boolean = { File(it).exists() }): Int = synchronized(lock) {
+        val keep = counts.filterKeys(exists)
+        val removed = counts.size - keep.size
+        if (removed > 0) {
+            counts = keep
+            save()
+        }
+        removed
+    }
+
     private fun load(): Map<String, Int> = runCatching {
         if (file.isFile) JSON.decodeFromString(SERIALIZER, file.readText()) else emptyMap()
     }.getOrDefault(emptyMap())

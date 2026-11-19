@@ -83,6 +83,19 @@ class TranscriptionPlannerTest {
     }
 
     @Test
+    fun failuresPruneMissingFiles() {
+        val existing = tmp.newFile("da.ogg")
+        val gone = File(tmp.root, "weg.ogg")
+        val f = TranscriptionFailures(File(tmp.root, "p.json"))
+        f.increment(existing)
+        f.increment(gone)
+        assertEquals(1, f.pruneMissing())
+        assertEquals(1, f.count(existing))
+        assertEquals(0, TranscriptionFailures(File(tmp.root, "p.json")).count(gone))
+        assertEquals(0, f.pruneMissing())
+    }
+
+    @Test
     fun transcriptSettingsDefaults() {
         val s = SettingsKeys.toAppSettings(mutablePreferencesOf())
         assertEquals(TranscriptionMode.Automatic, s.transcriptionMode)
