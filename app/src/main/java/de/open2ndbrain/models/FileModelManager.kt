@@ -106,8 +106,8 @@ class FileModelManager(
         workManager.enqueueUniqueWork(uniqueName(id), ExistingWorkPolicy.KEEP, request)
     }
 
-    /** Lädt alle Modelle (Pflicht + optional), die noch fehlen. */
-    fun downloadAll(unmeteredOnly: Boolean) = ModelCatalog.all.forEach { download(it.id, unmeteredOnly) }
+    /** Lädt die empfohlene Ausstattung (Standard-Spracherkennung, VAD, Sprechererkennung), soweit sie fehlt. */
+    fun downloadAll(unmeteredOnly: Boolean) = AsrSelection.RECOMMENDED.forEach { download(it.id, unmeteredOnly) }
 
     override fun cancel(id: String) {
         workManager.cancelUniqueWork(uniqueName(id))

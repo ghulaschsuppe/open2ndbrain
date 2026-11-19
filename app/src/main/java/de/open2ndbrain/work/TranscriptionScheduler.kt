@@ -22,6 +22,7 @@ import de.open2ndbrain.core.AppContainer
 import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.EngineStatus
 import de.open2ndbrain.core.ModelState
+import de.open2ndbrain.models.AsrSelection
 import de.open2ndbrain.ui.Formatters
 import de.open2ndbrain.settings.AppSettings
 import de.open2ndbrain.settings.TranscriptionMode
@@ -212,8 +213,7 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
         .setRequiresCharging(s.transcriptionMode == TranscriptionMode.ChargingOnly && !ignoreCharging)
         .build()
 
-    private fun modelsReady(states: Map<String, ModelState>): Boolean =
-        states[ModelCatalog.PARAKEET_V3.id] is ModelState.Installed && states[ModelCatalog.SILERO_VAD.id] is ModelState.Installed
+    private fun modelsReady(states: Map<String, ModelState>): Boolean = AsrSelection.ready(states)
 
     private fun reasonText(r: WaitingReason, nextSegmentEnd: Long): String = if (r == WaitingReason.WaitingForSegment) {
         appContext.getString(R.string.waiting_segment, Formatters.time(nextSegmentEnd))

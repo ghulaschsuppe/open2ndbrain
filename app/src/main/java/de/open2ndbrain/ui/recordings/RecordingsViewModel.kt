@@ -193,6 +193,19 @@ class RecordingsViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    private val retranscription = de.open2ndbrain.work.Retranscription(container)
+
+    /** Installierte Spracherkennungsmodelle (für „Mit diesem Modell neu transkribieren“). */
+    val installedAsrModels: StateFlow<List<de.open2ndbrain.core.ModelSpec>> = container.modelManager.states
+        .map { st -> de.open2ndbrain.core.ModelCatalog.asrModels.filter { st[it.id] is de.open2ndbrain.core.ModelState.Installed } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Vergleich: diese Aufnahme mit [modelId] neu transkribieren (wird vorgezogen). */
+    fun retranscribeWith(recording: RecordingFile, modelId: String) = viewModelScope.launch { retranscription.one(recording, modelId) }
+
+    /** Vergleich: alle Dateien des Meetings mit [modelId] neu transkribieren. */
+    fun retranscribeMeetingWith(meeting: Marker, modelId: String) = viewModelScope.launch { retranscription.meeting(meeting, modelId) }
+
     /** „Jetzt transkribieren“: ignoriert einmalig die Bedingung „Nur beim Laden“. */
     fun transcribeNow() = container.transcriptionScheduler.schedule(ignoreCharging = true)
 

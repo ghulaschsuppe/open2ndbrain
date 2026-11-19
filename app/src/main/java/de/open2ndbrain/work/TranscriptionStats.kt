@@ -23,6 +23,7 @@ data class TranscriptionRunStat(
     /** "service" oder "worker". */
     val origin: String,
     val device: String,
+    val asrModelId: String = "",
 ) {
     val realTimeFactor: Float? get() = TranscriptionPlanner.realTimeFactor(processingMs, audioMs)
 }
@@ -40,7 +41,9 @@ class TranscriptionStats(private val file: File) {
     }
 
     /** Mittlerer Echtzeitfaktor der letzten Läufe (null ohne Daten). */
-    fun averageRealTimeFactor(): Float? = runs.value.mapNotNull { it.realTimeFactor }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
+    fun averageRealTimeFactor(asrModelId: String? = null): Float? = runs.value
+        .filter { asrModelId == null || it.asrModelId == asrModelId }
+        .mapNotNull { it.realTimeFactor }.takeIf { it.isNotEmpty() }?.average()?.toFloat()
 
     private fun load(): List<TranscriptionRunStat> = runCatching {
         if (file.isFile) JSON.decodeFromString(SERIALIZER, file.readText()) else emptyList()

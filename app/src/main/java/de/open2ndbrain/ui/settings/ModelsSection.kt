@@ -54,7 +54,7 @@ import de.open2ndbrain.ui.theme.Spacing
 import de.open2ndbrain.ui.theme.tabular
 
 /** Gesamtgröße aller Modelle (für Hinweise zum Datenvolumen). */
-val ALL_MODELS_BYTES: Long get() = ModelCatalog.all.sumOf { it.sizeBytes }
+val ALL_MODELS_BYTES: Long get() = de.open2ndbrain.models.AsrSelection.RECOMMENDED_BYTES
 
 /** Sprachmodelle: Liste mit Download/Abbrechen/Löschen, Fortschritt und Import. */
 @Composable

@@ -39,7 +39,8 @@ class TranscriptionRunnerTest {
         var created = 0
         var closed = 0
 
-        override suspend fun config() = TranscriberConfig(File("/m"), File("/v"), null, 2)
+        var modelFor: (String) -> String = { "a" }
+        override suspend fun configFor(rec: RecordingFile) = TranscriberConfig(File("/m/" + modelFor(rec.audio.name)), File("/v"), null, 2)
         override fun newTranscriber(config: TranscriberConfig): Transcriber {
             created++
             return object : Transcriber {
@@ -129,6 +130,17 @@ class TranscriptionRunnerTest {
         assertTrue(deps2.failed.isEmpty()) // Modellfehler zählt nicht als Fehlversuch der Datei
         assertEquals("ModelBroken", deps2.status.lastError)
         assertEquals(1, deps2.closed)
+    }
+
+    @Test
+    fun modelChangeReloadsTranscriber() = runBlocking {
+        val deps = FakeDeps(listOf("a.ogg", "b.ogg", "c.ogg"))
+        deps.modelFor = { if (it == "b.ogg") "other" else "a" }
+        val r = TranscriptionRunner(deps, Dispatchers.IO)
+        assertEquals(TranscriptionRunner.Result.Done(3), r.run(TranscriptionRunner.Origin.Service))
+        // a (Modell a) → b (anderes Modell: neu laden) → c (wieder a: neu laden)
+        assertEquals(3, deps.created)
+        assertEquals(3, deps.closed)
     }
 
     @Test
