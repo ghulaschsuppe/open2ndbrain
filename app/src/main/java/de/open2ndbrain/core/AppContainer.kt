@@ -10,6 +10,8 @@ import de.open2ndbrain.settings.SettingsRepository
 import de.open2ndbrain.speakers.FileSpeakerRepository
 import de.open2ndbrain.transcription.FileTranscriptRepository
 import de.open2ndbrain.work.ContainerRunnerDeps
+import de.open2ndbrain.work.MicTest
+import de.open2ndbrain.work.NightQuality
 import de.open2ndbrain.work.TranscriptionFailures
 import de.open2ndbrain.work.TranscriptionOverrides
 import de.open2ndbrain.work.TranscriptionRunner
@@ -59,6 +61,12 @@ class AppContainer(context: Context) {
 
     /** Gemeinsame Abarbeitung der Warteschlange (Dienst und Worker, nie gleichzeitig). */
     val transcriptionRunner: TranscriptionRunner by lazy { TranscriptionRunner(ContainerRunnerDeps(appContext, this)) }
+
+    /** Nachtqualität: vorhandene Transkripte nachts mit genauerem Modell verbessern. */
+    val nightQuality: NightQuality by lazy { NightQuality(appContext, this) }
+
+    /** Mikrofon-Test: alle installierten Modelle mit einem vorgelesenen Text vergleichen. */
+    val micTest: MicTest by lazy { MicTest(appContext, this) }
 
     /** Vorgemerkte Vergleichs-Transkriptionen („Mit diesem Modell neu transkribieren“). */
     val transcriptionOverrides: TranscriptionOverrides by lazy {

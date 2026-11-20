@@ -71,6 +71,15 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
         if (started) return
         started = true
         registerBattery()
+        registerScreen()
+        // Nachtqualität: Hintergrundauftrag passend zur Einstellung, Status aktuell halten
+        scope.launch {
+            container.settings.settings.map { Triple(it.nightQuality, it.nightQualityModelId, it.nightQualityDays) }
+                .distinctUntilChanged().collect { (enabled, _, _) ->
+                    container.nightQuality.ensureScheduled(enabled)
+                    runCatching { container.nightQuality.refresh() }
+                }
+        }
         scope.launch {
             val s = container.settings.current()
             ensurePeriodic(s.transcriptionMode)
@@ -226,6 +235,24 @@ class TranscriptionScheduler(context: Context, private val container: AppContain
             WaitingReason.WaitingForSegment -> R.string.waiting_off
         },
     )
+
+    /** Bildschirm aus/an: Nachtqualität im Dienst sofort starten bzw. abbrechen. */
+    private fun registerScreen() {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) {
+                if (container.transcriptionRunner.serviceActive) container.transcriptionRunner.trigger()
+            }
+        }
+        ContextCompat.registerReceiver(
+            appContext,
+            receiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            },
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+    }
 
     private fun registerBattery() {
         val receiver = object : BroadcastReceiver() {

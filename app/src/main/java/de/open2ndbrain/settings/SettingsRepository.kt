@@ -23,7 +23,7 @@ import java.io.IOException
 
 /** Alle Einstellungen und der persistente Dienst-Zustand der App. */
 data class AppSettings(
-    /** Opus-Bitrate in kbit/s: 16 (Standard) oder 12 (Sparmodus). */
+    /** Opus-Bitrate in kbit/s: 32 (Standard), 24, 16; 12 nur noch, wenn früher aktiv gewählt. */
     val bitrateKbps: Int = DEFAULT_BITRATE,
     val discardSilence: Boolean = true,
     val micPreference: MicPreference = MicPreference.Auto,
@@ -48,6 +48,14 @@ data class AppSettings(
     val asrModelId: String? = null,
     /** Vorschlag „besseres Deutsch-Modell“ wurde ausgeblendet. */
     val asrSuggestionDismissed: Boolean = false,
+    /** Rauschfilter (GTCRN) vor der Erkennung – im Test meist schlechter, daher Standard aus. */
+    val denoiseBeforeAsr: Boolean = false,
+    /** Nachts (beim Laden, Bildschirm aus) mit einem genaueren Modell neu transkribieren. */
+    val nightQuality: Boolean = false,
+    /** Modell für die Nachtqualität; null = bestes installiertes „genau“-Modell. */
+    val nightQualityModelId: String? = null,
+    /** Wie weit zurück die Nachtqualität Aufnahmen verbessert (Tage). */
+    val nightQualityDays: Int = DEFAULT_NIGHT_DAYS,
 ) {
     /** Tatsächlich genutzte Threads für [cores] verfügbare Prozessorkerne. */
     fun effectiveThreads(cores: Int = Runtime.getRuntime().availableProcessors()): Int =
@@ -64,9 +72,27 @@ data class AppSettings(
     fun isPausedAt(now: Long): Boolean = pausedUntilEpochMs != 0L && pausedUntilEpochMs > now
 
     companion object {
-        const val DEFAULT_BITRATE = 16
-        const val SAVER_BITRATE = 12
-        val BITRATE_OPTIONS = listOf(DEFAULT_BITRATE, SAVER_BITRATE)
+        /** Gemessen: 32 kbit/s erkennt deutlich besser als 16 (Canary 16,6 → 13,8 % WER). */
+        const val DEFAULT_BITRATE = 32
+        /** Früherer Sparmodus – nicht mehr wählbar, bleibt aber erhalten, wenn er aktiv gewählt war. */
+        const val LEGACY_SAVER_BITRATE = 12
+        val BITRATE_OPTIONS = listOf(DEFAULT_BITRATE, 24, 16)
+
+        /** Wählbare Bitraten für die Anzeige; enthält 12, wenn sie gerade eingestellt ist. */
+        fun bitrateOptionsFor(current: Int): List<Int> =
+            if (current == LEGACY_SAVER_BITRATE) BITRATE_OPTIONS + LEGACY_SAVER_BITRATE else BITRATE_OPTIONS
+
+        /** Ungefährer Speicherbedarf in MB pro Stunde Sprache (Messung mit libopus, VBR). */
+        fun megabytesPerHour(kbps: Int): Double = when (kbps) {
+            12 -> 5.1
+            16 -> 6.8
+            24 -> 10.2
+            32 -> 13.6
+            else -> kbps * 0.425
+        }
+
+        const val DEFAULT_NIGHT_DAYS = 7
+        val NIGHT_DAYS_OPTIONS = listOf(3, DEFAULT_NIGHT_DAYS, 14, 30)
 
         const val RETENTION_UNLIMITED = 0
         const val DEFAULT_RETENTION_DAYS = 30
@@ -141,10 +167,16 @@ internal object SettingsKeys {
     val TRANSCRIPTION_INTERVAL = intPreferencesKey("transcription_interval_min")
     val ASR_MODEL = stringPreferencesKey("asr_model_id")
     val ASR_SUGGESTION_DISMISSED = booleanPreferencesKey("asr_suggestion_dismissed")
+    val DENOISE = booleanPreferencesKey("denoise_before_asr")
+    val NIGHT_QUALITY = booleanPreferencesKey("night_quality")
+    val NIGHT_QUALITY_MODEL = stringPreferencesKey("night_quality_model")
+    val NIGHT_QUALITY_DAYS = intPreferencesKey("night_quality_days")
 
     fun toAppSettings(p: Preferences): AppSettings {
         val defaults = AppSettings()
-        val bitrate = p[BITRATE]?.takeIf { it in AppSettings.BITRATE_OPTIONS } ?: defaults.bitrateKbps
+        // Nie aktiv gewählt → Standard (32). Aktiv gewählte Werte bleiben, auch der alte Sparmodus 12.
+        val bitrate = p[BITRATE]?.takeIf { it in AppSettings.BITRATE_OPTIONS || it == AppSettings.LEGACY_SAVER_BITRATE }
+            ?: defaults.bitrateKbps
         val retention = p[RETENTION_DAYS]?.takeIf { it >= 0 } ?: defaults.audioRetentionDays
         return AppSettings(
             bitrateKbps = bitrate,
@@ -164,6 +196,10 @@ internal object SettingsKeys {
                 ?: defaults.transcriptionIntervalMin,
             asrModelId = p[ASR_MODEL],
             asrSuggestionDismissed = p[ASR_SUGGESTION_DISMISSED] ?: false,
+            denoiseBeforeAsr = p[DENOISE] ?: false,
+            nightQuality = p[NIGHT_QUALITY] ?: false,
+            nightQualityModelId = p[NIGHT_QUALITY_MODEL],
+            nightQualityDays = p[NIGHT_QUALITY_DAYS]?.takeIf { it in AppSettings.NIGHT_DAYS_OPTIONS } ?: defaults.nightQualityDays,
         )
     }
 }
@@ -186,7 +222,7 @@ class SettingsRepository(context: Context) {
         settings.map { it.toEngineConfig(outputRoot) }.distinctUntilChanged()
 
     suspend fun setBitrate(kbps: Int) {
-        require(kbps in AppSettings.BITRATE_OPTIONS) { "Ungültige Bitrate: $kbps" }
+        require(kbps in AppSettings.bitrateOptionsFor(kbps)) { "Ungültige Bitrate: $kbps" }
         store.edit { it[SettingsKeys.BITRATE] = kbps }
     }
 
@@ -229,6 +265,24 @@ class SettingsRepository(context: Context) {
 
     suspend fun setSpeakerRecognition(value: Boolean) {
         store.edit { it[SettingsKeys.SPEAKER_RECOGNITION] = value }
+    }
+
+    suspend fun setDenoiseBeforeAsr(value: Boolean) {
+        store.edit { it[SettingsKeys.DENOISE] = value }
+    }
+
+    suspend fun setNightQuality(value: Boolean) {
+        store.edit { it[SettingsKeys.NIGHT_QUALITY] = value }
+    }
+
+    /** null = automatisch (bestes installiertes „genau“-Modell). */
+    suspend fun setNightQualityModel(id: String?) {
+        store.edit { if (id == null) it.remove(SettingsKeys.NIGHT_QUALITY_MODEL) else it[SettingsKeys.NIGHT_QUALITY_MODEL] = id }
+    }
+
+    suspend fun setNightQualityDays(days: Int) {
+        require(days in AppSettings.NIGHT_DAYS_OPTIONS) { "Ungültige Tage: $days" }
+        store.edit { it[SettingsKeys.NIGHT_QUALITY_DAYS] = days }
     }
 
     suspend fun setAsrModel(id: String) {

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -63,6 +64,35 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setThreads(n: Int) = launch { container.settings.setTranscriptionThreads(n) }
     fun setInterval(minutes: Int) = launch { container.settings.setTranscriptionInterval(minutes) }
+
+    // ---------------------------------------------------------------- Rauschfilter & Nachtqualität
+
+    /** Rauschfilter vor der Erkennung (Standard aus; im Mikrofon-Test prüfen). Lädt das kleine Modell bei Bedarf. */
+    fun setDenoise(enabled: Boolean) = launch {
+        container.settings.setDenoiseBeforeAsr(enabled)
+        if (enabled) container.modelManager.download(de.open2ndbrain.core.ModelCatalog.GTCRN_DENOISER.id, unmeteredOnly = false)
+    }
+
+    /** „Nachtqualität: 12 von 30 Aufnahmen verbessert“, läuft gerade, Modell, gleiches Modell wie tagsüber. */
+    val nightQuality: StateFlow<de.open2ndbrain.work.NightQualityStatus> = container.nightQuality.status
+
+    /** Installierte Modelle, die als Nachtmodell infrage kommen (genaueste zuerst). */
+    val nightModelOptions: StateFlow<List<de.open2ndbrain.core.ModelSpec>> = container.modelManager.states
+        .map { st ->
+            de.open2ndbrain.core.ModelCatalog.asrModels
+                .filter { st[it.id] is de.open2ndbrain.core.ModelState.Installed && it.benchmark != null }
+                .sortedBy { it.benchmark!!.werEverydayPct }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun setNightQuality(enabled: Boolean) = launch { container.settings.setNightQuality(enabled) }
+
+    /** null = automatisch (genauestes installiertes Modell). */
+    fun setNightModel(id: String?) = launch { container.settings.setNightQualityModel(id) }
+
+    fun setNightDays(days: Int) = launch { container.settings.setNightQualityDays(days) }
+
+    fun refreshNightQuality() = launch { container.nightQuality.refresh() }
 
     fun download(id: String, unmeteredOnly: Boolean) = models.download(id, unmeteredOnly)
     fun downloadAll(unmeteredOnly: Boolean) = models.downloadAll(unmeteredOnly)

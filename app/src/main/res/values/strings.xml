@@ -87,9 +87,13 @@
     <string name="settings_section_battery">Akku</string>
     <string name="settings_section_about">Über die App</string>
     <string name="settings_bitrate">Qualität</string>
-    <string name="settings_bitrate_16">16 kbit/s – Standard</string>
-    <string name="settings_bitrate_16_desc">Gute Sprachqualität, ca. 6,8 MB pro Stunde Sprache</string>
-    <string name="settings_bitrate_12">12 kbit/s – Sparmodus</string>
+    <string name="settings_bitrate_32">32 kbit/s – Standard</string>
+    <string name="settings_bitrate_32_desc">Beste Erkennung, ca. 13,6 MB pro Stunde Sprache (mit „Stille verwerfen“ typisch ~55 MB pro Tag)</string>
+    <string name="settings_bitrate_24">24 kbit/s</string>
+    <string name="settings_bitrate_24_desc">Sehr gute Erkennung, ca. 10,2 MB pro Stunde Sprache</string>
+    <string name="settings_bitrate_16">16 kbit/s – Sparsam</string>
+    <string name="settings_bitrate_16_desc">Spart Speicher, erkennt etwas schlechter; ca. 6,8 MB pro Stunde Sprache</string>
+    <string name="settings_bitrate_12">12 kbit/s – alter Sparmodus</string>
     <string name="settings_bitrate_12_desc">Noch gut verständlich, ca. 5,1 MB pro Stunde Sprache</string>
     <string name="settings_discard_silence">Stille verwerfen</string>
     <string name="settings_discard_silence_desc">Nur Sprachabschnitte speichern (mit kurzem Vor- und Nachlauf). Spart viel Speicher.</string>
@@ -447,4 +451,11 @@ Namensnennung: %2$s</string>
     <string name="transcription_device">Gerät: %1$s</string>
     <string name="settings_threads_auto_short">Auto</string>
     <string name="settings_interval_desc">Kürzer = Transkript früher, länger = etwas sparsamer</string>
+
+    <!-- Mikrofon-Test -->
+    <string name="mic_test_failed">Der Mikrofon-Test ist fehlgeschlagen.</string>
+    <string name="mic_test_no_audio">Keine Testaufnahme gefunden – lief die Aufnahme während des Vorlesens?</string>
+    <string name="mic_test_text_1">Am Dienstag, den 14. März, treffe ich mich um halb drei mit Katharina Bergmann im Café am Marktplatz. Wir wollen besprechen, wie wir den Umzug in die neue Wohnung in der Lindenstraße 27 organisieren. Ihr Bruder Jonas hat angeboten, mit dem Transporter zu helfen, aber er kann erst ab 16 Uhr. Außerdem müssen wir noch klären, wer die Kaution von 1800 Euro überweist und ob wir die alte Küche für 350 Euro verkaufen. Ich glaube, am einfachsten ist es, wenn wir eine Liste machen und die Aufgaben fair verteilen. Danach gehe ich noch kurz zur Apotheke und hole das Rezept für meine Mutter ab.</string>
+    <string name="mic_test_text_2">Guten Morgen zusammen, kurzer Stand von meiner Seite. Das Angebot für die Firma Schneider und Söhne ist gestern rausgegangen, insgesamt knapp 42000 Euro für drei Monate. Herr Özdemir hat sich heute früh gemeldet und gefragt, ob wir den Termin am Donnerstag auf neun Uhr vorziehen können. Bei der Präsentation fehlen uns noch die Zahlen aus dem zweiten Quartal, die liefert Frau Wagner bis Mittwoch. Mein Vorschlag wäre, dass wir uns danach noch einmal zu dritt zusammensetzen und die offenen Punkte durchgehen. Falls jemand Fragen zur Rechnung hat, schreibt mir einfach eine kurze Nachricht.</string>
+    <string name="mic_test_text_3">Für den Kuchen brauchst du 250 Gramm Mehl, 200 Gramm Zucker, vier Eier und ein Päckchen Backpulver. Den Ofen heizt du auf 180 Grad vor, Umluft reicht 160. Zuerst schlägst du die Butter mit dem Zucker schaumig, dann kommen die Eier nacheinander dazu. Opa Heinrich hat immer noch eine Prise Zimt und den Abrieb einer Zitrone hineingegeben, das macht ihn besonders saftig. Nach ungefähr 45 Minuten machst du die Stäbchenprobe. Wenn nichts mehr kleben bleibt, ist er fertig. Am Sonntag um drei kommen Tante Martina und die Kinder, bis dahin sollte er abgekühlt sein.</string>
 </resources>

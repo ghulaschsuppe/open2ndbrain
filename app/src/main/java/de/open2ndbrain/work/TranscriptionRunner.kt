@@ -41,7 +41,10 @@ class TranscriptionRunner(
     /** Eigener Thread mit Hintergrundpriorität; [runInterruptible] unterbricht ihn bei Abbruch. */
     private val compute: CoroutineDispatcher = backgroundDispatcher(),
 ) {
-    enum class Origin { Service, Worker }
+    enum class Origin { Service, Worker, MicTest }
+
+    /** Normal = Warteschlange ohne Transkript; Night = Nachtqualität (vorhandene Transkripte mit genauerem Modell). */
+    enum class Mode { Normal, Night }
 
     sealed interface Result {
         data class Done(val processed: Int) : Result
@@ -58,13 +61,17 @@ class TranscriptionRunner(
          * Konfiguration für diese Datei (gewähltes bzw. für „Mit diesem Modell neu transkribieren“ vorgemerktes
          * Modell) oder null, wenn Pflichtmodelle fehlen.
          */
-        suspend fun configFor(rec: RecordingFile): TranscriberConfig?
+        suspend fun configFor(rec: RecordingFile, mode: Mode = Mode.Normal): TranscriberConfig?
         fun newTranscriber(config: TranscriberConfig): Transcriber
-        /** Offene Dateien in Verarbeitungsreihenfolge (Meetings zuerst, dauerhaft fehlerhafte ausgefiltert). */
-        suspend fun pending(): List<RecordingFile>
+        /**
+         * Offene Dateien in Verarbeitungsreihenfolge. Normal: ohne Transkript (Meetings zuerst, dauerhaft fehlerhafte
+         * ausgefiltert). Night: Transkript mit anderem als dem Nachtmodell, neueste zuerst – das alte Transkript
+         * bleibt bis zum erfolgreichen Überschreiben bestehen.
+         */
+        suspend fun pending(mode: Mode = Mode.Normal): List<RecordingFile>
         fun updateStatus(transform: (TranscriptionStatus) -> TranscriptionStatus)
-        fun onTranscribed(rec: RecordingFile, transcript: Transcript, loadMs: Long, threads: Int, origin: Origin)
-        fun onFailed(rec: RecordingFile, error: Exception)
+        fun onTranscribed(rec: RecordingFile, transcript: Transcript, loadMs: Long, threads: Int, origin: Origin, mode: Mode = Mode.Normal)
+        fun onFailed(rec: RecordingFile, error: Exception, mode: Mode = Mode.Normal)
         fun text(kind: Text): String
     }
 
@@ -94,6 +101,33 @@ class TranscriptionRunner(
 
     val forceRequested: Boolean get() = forceOnce.get()
 
+    /** Ein exklusiver Lauf (Mikrofon-Test) wartet: laufende Abarbeitung hört nach der aktuellen Datei auf. */
+    private val exclusiveWaiting = AtomicBoolean(false)
+
+    /** Wartet gerade ein exklusiver Lauf? */
+    val exclusivePending: Boolean get() = exclusiveWaiting.get()
+
+    /**
+     * Exklusiv rechnen (Mikrofon-Test): wartet, bis kein Lauf mehr aktiv ist (laufende Läufe enden nach der aktuellen
+     * Datei), und hält den Runner während [block] fest.
+     */
+    suspend fun <T> exclusive(block: suspend () -> T): T {
+        exclusiveWaiting.set(true)
+        try {
+            mutex.lock()
+        } finally {
+            exclusiveWaiting.set(false)
+        }
+        holderRef.set(Origin.MicTest)
+        try {
+            return block()
+        } finally {
+            holderRef.set(null)
+            mutex.unlock()
+            trigger()
+        }
+    }
+
     /**
      * Arbeitet die Warteschlange ab, solange [canContinue] true liefert. Abbruch der Coroutine unterbricht den
      * Rechen-Thread (kein halbes Transkript). [onProgress]: Dateiname, Fortschritt 0..1, offene Dateien.
@@ -102,9 +136,10 @@ class TranscriptionRunner(
         origin: Origin,
         canContinue: suspend () -> Boolean = { true },
         onProgress: suspend (String, Float, Int) -> Unit = { _, _, _ -> },
+        mode: Mode = Mode.Normal,
     ): Result {
         when (origin) {
-            Origin.Worker -> if (!mutex.tryLock()) return Result.Skipped
+            Origin.Worker, Origin.MicTest -> if (!mutex.tryLock()) return Result.Skipped
             Origin.Service -> mutex.lock()
         }
         holderRef.set(origin)
@@ -113,11 +148,13 @@ class TranscriptionRunner(
         var processed = 0
         try {
             var first = true
-            while (canContinue()) {
-                val pending = deps.pending()
+            while (!exclusiveWaiting.get() && canContinue()) {
+                // Nachtqualität nur, solange keine neuen Aufnahmen auf ihr erstes Transkript warten
+                if (mode == Mode.Night && deps.pending(Mode.Normal).isNotEmpty()) break
+                val pending = deps.pending(mode)
                 val rec = pending.firstOrNull() ?: break
                 val remaining = pending.size
-                val config = deps.configFor(rec) ?: return Result.ModelMissing
+                val config = deps.configFor(rec, mode) ?: return Result.ModelMissing
                 // Anderes Modell (Einstellung geändert oder Vergleich mit anderem Modell): alten Transcriber schließen.
                 if (transcriber != null && config != currentConfig) {
                     val old = transcriber
@@ -136,7 +173,7 @@ class TranscriptionRunner(
                     val loadMs = if (first) (wall - transcript.processingMs).coerceAtLeast(0) else 0L
                     first = false
                     processed++
-                    deps.onTranscribed(rec, transcript, loadMs, config.numThreads, origin)
+                    deps.onTranscribed(rec, transcript, loadMs, config.numThreads, origin, mode)
                     deps.updateStatus {
                         it.copy(
                             lastRealTimeFactor = TranscriptionPlanner.realTimeFactor(transcript.processingMs, transcript.audioDurationMs)
@@ -159,12 +196,12 @@ class TranscriptionRunner(
                 } catch (e: Exception) {
                     // IOException, IllegalStateException u. a.: Fehler dieser Datei, nicht des Modells.
                     Log.w(TAG, "Transkription von ${rec.audio.name} fehlgeschlagen", e)
-                    deps.onFailed(rec, e)
+                    deps.onFailed(rec, e, mode)
                     deps.updateStatus { it.copy(lastError = e.message ?: e.javaClass.simpleName) }
                 }
             }
             // Warteschlange leer (oder Bedingungen weg): einmaliges „Jetzt“ ist erledigt, wenn nichts mehr offen ist.
-            if (deps.pending().isEmpty()) forceOnce.set(false)
+            if (mode == Mode.Normal && deps.pending().isEmpty()) forceOnce.set(false)
             return Result.Done(processed)
         } finally {
             transcriber?.let { t -> runCatching { withContext(compute) { t.close() } } }
@@ -214,24 +251,29 @@ class TranscriptionRunner(
 class ContainerRunnerDeps(context: Context, private val c: AppContainer) : TranscriptionRunner.Deps {
     private val appContext = context.applicationContext
 
-    override suspend fun configFor(rec: RecordingFile): TranscriberConfig? {
+    override suspend fun configFor(rec: RecordingFile, mode: TranscriptionRunner.Mode): TranscriberConfig? {
         val s = c.settings.current()
         val installed = AsrSelection.installedIds(c.modelManager.states.value)
-        // Vorgemerktes Vergleichsmodell, sonst das gewählte (bzw. installierte Ersatz-) Modell
-        val asrId = c.transcriptionOverrides.modelFor(rec.audio)?.takeIf { it in installed }
-            ?: AsrSelection.effective(s.asrModelId, installed)
+        val asrId = if (mode == TranscriptionRunner.Mode.Night) {
+            NightQuality.model(s, installed) ?: return null
+        } else {
+            // Vorgemerktes Vergleichsmodell, sonst das gewählte (bzw. installierte Ersatz-) Modell
+            c.transcriptionOverrides.modelFor(rec.audio)?.takeIf { it in installed } ?: AsrSelection.effective(s.asrModelId, installed)
+        }
         val spec = ModelCatalog.byId(asrId) ?: return null
         val asrDir = c.modelManager.installedDir(asrId) ?: return null
         val vad = c.modelManager.installedFile(ModelCatalog.SILERO_VAD) ?: return null
         val speaker = if (s.speakerRecognition) c.modelManager.installedFile(ModelCatalog.WESPEAKER_RESNET34) else null
         withContext(Dispatchers.IO) { c.transcriptionFailures.pruneMissing() }
         val threads = s.effectiveThreads()
-        return TranscriberConfig(asrDir, vad, speaker, threads, asrModel = spec)
+        val denoiser = if (s.denoiseBeforeAsr) c.modelManager.installedFile(ModelCatalog.GTCRN_DENOISER) else null
+        return TranscriberConfig(asrDir, vad, speaker, threads, denoiserModelFile = denoiser, asrModel = spec)
     }
 
     override fun newTranscriber(config: TranscriberConfig): Transcriber = SherpaTranscriber(appContext, config, c.speakers)
 
-    override suspend fun pending(): List<RecordingFile> {
+    override suspend fun pending(mode: TranscriptionRunner.Mode): List<RecordingFile> {
+        if (mode == TranscriptionRunner.Mode.Night) return c.nightQuality.pending()
         val pending = withContext(Dispatchers.IO) { c.transcripts.pending() }
             .filterNot { c.transcriptionFailures.isBlocked(it.audio) }
         val ordered = MarkerLogic.prioritize(pending, c.markers.current(), System.currentTimeMillis())
@@ -242,8 +284,15 @@ class ContainerRunnerDeps(context: Context, private val c: AppContainer) : Trans
 
     override fun updateStatus(transform: (TranscriptionStatus) -> TranscriptionStatus) = c.transcriptionStatus.update(transform)
 
-    override fun onTranscribed(rec: RecordingFile, transcript: Transcript, loadMs: Long, threads: Int, origin: TranscriptionRunner.Origin) {
-        c.transcriptionFailures.clear(rec.audio)
+    override fun onTranscribed(
+        rec: RecordingFile,
+        transcript: Transcript,
+        loadMs: Long,
+        threads: Int,
+        origin: TranscriptionRunner.Origin,
+        mode: TranscriptionRunner.Mode,
+    ) {
+        if (mode == TranscriptionRunner.Mode.Night) c.nightQuality.onImproved(rec) else c.transcriptionFailures.clear(rec.audio)
         c.transcriptionOverrides.clear(rec.audio)
         val stat = TranscriptionRunStat(
             atEpochMs = System.currentTimeMillis(),
@@ -252,7 +301,7 @@ class ContainerRunnerDeps(context: Context, private val c: AppContainer) : Trans
             processingMs = transcript.processingMs,
             loadMs = loadMs,
             threads = threads,
-            origin = origin.name.lowercase(),
+            origin = origin.name.lowercase() + if (mode == TranscriptionRunner.Mode.Night) "-night" else "",
             device = TranscriptionStats.deviceDescription(),
             asrModelId = transcript.asrModelId,
         )
@@ -264,7 +313,11 @@ class ContainerRunnerDeps(context: Context, private val c: AppContainer) : Trans
         )
     }
 
-    override fun onFailed(rec: RecordingFile, error: Exception) {
+    override fun onFailed(rec: RecordingFile, error: Exception, mode: TranscriptionRunner.Mode) {
+        if (mode == TranscriptionRunner.Mode.Night) {
+            c.nightQuality.onFailed(rec)
+            return
+        }
         // Fehlversuch zählen – außer die Datei wurde inzwischen gelöscht.
         if (rec.audio.exists()) c.transcriptionFailures.increment(rec.audio) else c.transcriptionFailures.clear(rec.audio)
     }

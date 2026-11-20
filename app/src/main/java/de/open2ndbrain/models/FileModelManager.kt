@@ -12,6 +12,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import de.open2ndbrain.core.AsrEngine
 import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.ModelManager
 import de.open2ndbrain.core.ModelSpec
@@ -58,6 +59,21 @@ class FileModelManager(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val workManager by lazy { WorkManager.getInstance(appContext) }
 
+    /**
+     * Systemerkennung (ohne Dateien): „installiert“ heißt verfügbar + deutsches Sprachpaket vorhanden.
+     * Wird vom Container mit `SystemRecognizerSupport` des ML-Agenten belegt; bis dahin „nicht verfügbar“.
+     */
+    interface SystemAsr {
+        fun isAvailable(): Boolean
+        fun requestDownload()
+    }
+
+    @Volatile
+    var systemAsr: SystemAsr = object : SystemAsr {
+        override fun isAvailable() = false
+        override fun requestDownload() = Unit
+    }
+
     private val fsStates = MutableStateFlow(readFileSystem())
     /** Laufzeit-Zustände (Download/Prüfung/Fehler) überlagern den Dateisystem-Zustand. */
     private val runtime = MutableStateFlow<Map<String, ModelState>>(emptyMap())
@@ -89,6 +105,11 @@ class FileModelManager(
     /** Startet bzw. setzt den Download fort. [unmeteredOnly]: nur über WLAN/unbegrenzte Netze. */
     fun download(id: String, unmeteredOnly: Boolean) {
         val spec = ModelCatalog.byId(id) ?: return
+        if (isSystemModel(spec)) {
+            // Keine Dateien: das System lädt das Sprachpaket selbst.
+            systemAsr.requestDownload()
+            return
+        }
         if (store.isInstalled(spec)) return
         runtime.update { it + (id to ModelState.Downloading(store.bytesPresent(spec), spec.sizeBytes)) }
         val request = OneTimeWorkRequestBuilder<ModelDownloadWorker>()
@@ -126,8 +147,11 @@ class FileModelManager(
 
     override fun installedDir(id: String): File? {
         val spec = ModelCatalog.byId(id) ?: return null
+        if (isSystemModel(spec)) return if (systemAsr.isAvailable()) store.dir(spec).apply { mkdirs() } else null
         return if (store.isInstalled(spec)) store.dir(spec) else null
     }
+
+    private fun isSystemModel(spec: ModelSpec) = spec.asrEngine == AsrEngine.AndroidSystem
 
     /** Datei eines installierten Modells (z. B. VAD- oder Sprechermodell). */
     fun installedFile(spec: ModelSpec, index: Int = 0): File? =
@@ -252,8 +276,11 @@ class FileModelManager(
 
     private fun readFileSystem(): Map<String, ModelState> = ModelCatalog.all.associate { it.id to fsState(it) }
 
-    private fun fsState(spec: ModelSpec): ModelState =
-        if (store.isInstalled(spec)) ModelState.Installed(store.dir(spec)) else ModelState.NotInstalled
+    private fun fsState(spec: ModelSpec): ModelState = when {
+        isSystemModel(spec) -> installedDir(spec.id)?.let { ModelState.Installed(it) } ?: ModelState.NotInstalled
+        store.isInstalled(spec) -> ModelState.Installed(store.dir(spec))
+        else -> ModelState.NotInstalled
+    }
 
     companion object {
         private const val TAG = "ModelDownload"

@@ -59,7 +59,10 @@ class ServiceTranscription(private val c: AppContainer) {
 
     private suspend fun processLoop() = kotlinx.coroutines.coroutineScope {
         for (ignored in runner.triggers) {
-            if (decide() !is RunDecision.Run) continue
+            if (decide() !is RunDecision.Run) {
+                runNight(this)
+                continue
+            }
             val job = launch { runner.run(TranscriptionRunner.Origin.Service, canContinue = { decide() is RunDecision.Run }) }
             // Bedingungen während einer Datei weggefallen (Ladegerät ab bei „Nur beim Laden“, Akku < 20 %): abbrechen.
             val watcher = launch {
@@ -74,7 +77,30 @@ class ServiceTranscription(private val c: AppContainer) {
             job.join()
             watcher.cancel()
             c.transcriptionScheduler.refreshStatus()
+            // Normale Warteschlange erledigt → ggf. Nachtqualität
+            runNight(this)
         }
+    }
+
+    /** Nachtqualität (Ladegerät, Bildschirm aus, nachts/Ruhe), solange keine neuen Aufnahmen warten. */
+    private suspend fun runNight(scope: CoroutineScope) {
+        val night = c.nightQuality
+        if (!night.allowedNow()) return
+        night.setRunning(true)
+        val job = scope.launch {
+            runner.run(TranscriptionRunner.Origin.Service, canContinue = { night.allowedNow() }, mode = TranscriptionRunner.Mode.Night)
+        }
+        // Bildschirm an / Ladegerät ab: sofort abbrechen (altes Transkript bleibt erhalten)
+        val watcher = scope.launch {
+            while (job.isActive) {
+                delay(WATCH_INTERVAL_MS)
+                if (!night.allowedNow()) job.cancel()
+            }
+        }
+        job.join()
+        watcher.cancel()
+        night.setRunning(false)
+        night.refresh()
     }
 
     /** Sicherheitsnetz: regelmäßig nachsehen, ob etwas offen ist (z. B. nach Ende eines Fehler-Backoffs). */

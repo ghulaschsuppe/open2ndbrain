@@ -178,12 +178,11 @@ fun SettingsContent(
                     // ---------------------------------------------------------------- Aufnahme
                     SettingsGroup(stringResource(R.string.settings_section_recording)) {
                         SettingHeader(Icons.Filled.HighQuality, stringResource(R.string.settings_bitrate), stringResource(R.string.settings_bitrate_desc))
-                        AppSettings.BITRATE_OPTIONS.forEach { kbps ->
-                            val std = kbps == AppSettings.DEFAULT_BITRATE
+                        AppSettings.bitrateOptionsFor(s.bitrateKbps).forEach { kbps ->
                             RadioOption(
                                 selected = s.bitrateKbps == kbps,
-                                title = stringResource(if (std) R.string.settings_bitrate_16 else R.string.settings_bitrate_12),
-                                subtitle = stringResource(if (std) R.string.settings_bitrate_16_desc else R.string.settings_bitrate_12_desc),
+                                title = stringResource(de.open2ndbrain.settings.SettingsLabels.bitrateTitle(kbps)),
+                                subtitle = stringResource(de.open2ndbrain.settings.SettingsLabels.bitrateDescription(kbps)),
                                 onClick = { actions.onBitrate(kbps) },
                             )
                         }

@@ -40,7 +40,7 @@ class TranscriptionRunnerTest {
         var closed = 0
 
         var modelFor: (String) -> String = { "a" }
-        override suspend fun configFor(rec: RecordingFile) = TranscriberConfig(File("/m/" + modelFor(rec.audio.name)), File("/v"), null, 2)
+        override suspend fun configFor(rec: RecordingFile, mode: TranscriptionRunner.Mode) = TranscriberConfig(File("/m/" + modelFor(rec.audio.name)), File("/v"), null, 2)
         override fun newTranscriber(config: TranscriberConfig): Transcriber {
             created++
             return object : Transcriber {
@@ -59,14 +59,18 @@ class TranscriptionRunnerTest {
             }
         }
 
-        override suspend fun pending() = synchronized(queue) { queue.toList() }
+        val nightQueue = mutableListOf<RecordingFile>()
+        override suspend fun pending(mode: TranscriptionRunner.Mode) = synchronized(queue) {
+            if (mode == TranscriptionRunner.Mode.Night) nightQueue.toList() else queue.toList()
+        }
         override fun updateStatus(transform: (TranscriptionStatus) -> TranscriptionStatus) {
             status = transform(status)
         }
-        override fun onTranscribed(rec: RecordingFile, transcript: Transcript, loadMs: Long, threads: Int, origin: TranscriptionRunner.Origin) {
+        override fun onTranscribed(rec: RecordingFile, transcript: Transcript, loadMs: Long, threads: Int, origin: TranscriptionRunner.Origin, mode: TranscriptionRunner.Mode) {
+            synchronized(queue) { nightQueue.remove(rec) }
             done += rec.audio.name
         }
-        override fun onFailed(rec: RecordingFile, error: Exception) {
+        override fun onFailed(rec: RecordingFile, error: Exception, mode: TranscriptionRunner.Mode) {
             failed += rec.audio.name
             synchronized(queue) { queue.remove(rec) }
         }
@@ -141,6 +145,36 @@ class TranscriptionRunnerTest {
         // a (Modell a) → b (anderes Modell: neu laden) → c (wieder a: neu laden)
         assertEquals(3, deps.created)
         assertEquals(3, deps.closed)
+    }
+
+    @Test
+    fun nightModeYieldsToNewRecordings() = runBlocking {
+        val deps = FakeDeps(emptyList())
+        deps.nightQueue += RecordingFile(File("/a/old1.ogg"), null, 0, 1000, 1, false)
+        deps.nightQueue += RecordingFile(File("/a/old2.ogg"), null, 0, 1000, 1, false)
+        val r = TranscriptionRunner(deps, Dispatchers.IO)
+        assertEquals(TranscriptionRunner.Result.Done(2), r.run(TranscriptionRunner.Origin.Service, mode = TranscriptionRunner.Mode.Night))
+        // Wartet eine neue Aufnahme, hat sie Vorrang: Nachtlauf verarbeitet nichts
+        deps.nightQueue += RecordingFile(File("/a/old3.ogg"), null, 0, 1000, 1, false)
+        deps.queue += RecordingFile(File("/a/new.ogg"), null, 0, 1000, 1, false)
+        assertEquals(TranscriptionRunner.Result.Done(0), r.run(TranscriptionRunner.Origin.Service, mode = TranscriptionRunner.Mode.Night))
+    }
+
+    @Test
+    fun exclusiveWaitsForRunningFileThenBlocksOthers() = runBlocking {
+        val deps = FakeDeps(listOf("a.ogg", "b.ogg"))
+        deps.gate = CountDownLatch(1)
+        deps.entered = CompletableDeferred()
+        val r = TranscriptionRunner(deps, Dispatchers.IO)
+        val service = async(Dispatchers.Default) { r.run(TranscriptionRunner.Origin.Service) }
+        withTimeout(5_000) { deps.entered!!.await() }
+        val test = async(Dispatchers.Default) { r.exclusive { r.holder } }
+        withTimeout(5_000) { while (!r.exclusivePending) kotlinx.coroutines.delay(10) }
+        deps.gate!!.countDown()
+        // Der Dienst hört nach der aktuellen Datei auf (b bleibt offen), dann läuft der exklusive Block
+        assertEquals(TranscriptionRunner.Result.Done(1), service.await())
+        assertEquals(TranscriptionRunner.Origin.MicTest, test.await())
+        assertNull(r.holder)
     }
 
     @Test

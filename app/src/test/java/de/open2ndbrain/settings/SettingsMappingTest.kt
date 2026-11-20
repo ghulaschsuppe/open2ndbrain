@@ -16,13 +16,13 @@ class SettingsMappingTest {
     @Test
     fun defaultsMatchConcept() {
         val s = SettingsKeys.toAppSettings(mutablePreferencesOf())
-        assertEquals(16, s.bitrateKbps)
+        assertEquals(32, s.bitrateKbps)
         assertTrue(s.discardSilence)
         assertEquals(MicPreference.Auto, s.micPreference)
         assertEquals(30, s.audioRetentionDays)
         assertFalse(s.recordingDesired)
         assertFalse(s.onboardingDone)
-        assertEquals(EngineConfig(outputRoot = root), s.toEngineConfig(root))
+        assertEquals(EngineConfig(outputRoot = root, bitrateKbps = 32), s.toEngineConfig(root))
     }
 
     @Test
@@ -53,7 +53,7 @@ class SettingsMappingTest {
         val s = SettingsKeys.toAppSettings(
             mutablePreferencesOf(SettingsKeys.BITRATE to 64, SettingsKeys.RETENTION_DAYS to -3, SettingsKeys.MIC_PREFERENCE to "kaputt"),
         )
-        assertEquals(16, s.bitrateKbps)
+        assertEquals(32, s.bitrateKbps)
         assertEquals(30, s.audioRetentionDays)
         assertEquals(MicPreference.Auto, s.micPreference)
     }
