@@ -101,3 +101,17 @@ feinen VAD-Abschnitten desselben Sprechers (≤ 15 s), Wortzeiten werden proport
 Canary ist in der Pipeline langsamer als im Satz-Benchmark (RTF 0,09), weil kurze Einheiten den festen Decoder-Aufwand
 je Aufruf stärker gewichten. **Lautstärkenormalisierung vor dem Embedding schadet** (FastConformer-Lauf: 2 statt 3 Profile,
 78 %) – sie bleibt nur vor der ASR aktiv (`normalizeForEmbeddings = false`).
+
+## Runde 2: Bitrate, Rauschfilter, Whisper turbo (Nutzer: „nicht wie Cloud“)
+FLEURS-de dev, 40 Sätze, Alltagsbedingungen (leise, Hall, Rauschen 8 dB SNR), immer mit Lautstärke-Normalisierung.
+Skript: `tools/model-eval/asr_benchmark_round2.py`.
+
+| Modell | Opus 16 | Opus 24 | Opus 32 | Opus 16 + GTCRN-Rauschfilter | RTF |
+|---|---|---|---|---|---|
+| FastConformer DE | 19,0 % | 18,1 % | 17,3 % | 24,0 % | 0,02–0,05 |
+| Canary 180M (de) | 16,6 % | – | **13,8 %** | 25,6 % | 0,19–0,22 |
+| Whisper large-v3-turbo (de) | 17,1 % | – | – | – | **2,1** (sauber 0,27, WER 6,3 %) |
+
+**Entscheidungen:** Standard-Bitrate 32 kbit/s (deutlicher Gewinn v. a. für Canary). Rauschfilter schadet beiden
+Modellen → nur Option, Standard aus. Whisper turbo: nicht besser als Canary, bei Rauschen 10× langsamer → nicht in den
+Katalog; Nachtqualität nutzt Canary.
