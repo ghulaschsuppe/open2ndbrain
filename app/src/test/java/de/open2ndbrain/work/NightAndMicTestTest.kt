@@ -66,7 +66,17 @@ class NightAndMicTestTest {
         assertEquals(25.0, MicTestScoring.werPct("eins zwei drei vier", "eins zwei drei"), 1e-9)
         assertEquals(50.0, MicTestScoring.werPct("eins zwei drei vier", "eins zwo drei fünf"), 1e-9)
         assertEquals(100.0, MicTestScoring.werPct("a b", "a b c d"), 1e-9)
-        assertEquals(listOf("lindenstraße", "27", "e", "mail"), MicTestScoring.normalizeWords("Lindenstraße 27, E-Mail."))
+        // Ausrichtung für die Anzeige: richtig / falsch / fehlt / zusätzlich
+        val marks = MicTestScoring.align("Wir treffen uns heute im Büro", "wir treffen uns morgen im großen Büro")
+        assertEquals(
+            listOf(
+                "wir" to MicTestScoring.Mark.Ok, "treffen" to MicTestScoring.Mark.Ok, "uns" to MicTestScoring.Mark.Ok,
+                "morgen" to MicTestScoring.Mark.Wrong, "im" to MicTestScoring.Mark.Ok,
+                "großen" to MicTestScoring.Mark.Extra, "büro" to MicTestScoring.Mark.Ok,
+            ),
+            marks,
+        )
+        assertEquals(listOf("a" to MicTestScoring.Mark.Ok, "b" to MicTestScoring.Mark.Missing), MicTestScoring.align("a b", "a"))
 
         val slowBest = MicTestModelResult(canary, 10.0, 9_000, hypothesis = "")
         val fastAlmost = MicTestModelResult(fast, 10.8, 1_000, hypothesis = "")

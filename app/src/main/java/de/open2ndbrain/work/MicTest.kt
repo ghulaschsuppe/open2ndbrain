@@ -10,6 +10,7 @@ import de.open2ndbrain.core.TranscriberConfig
 import de.open2ndbrain.markers.MarkerLogic
 import de.open2ndbrain.models.AsrSelection
 import de.open2ndbrain.transcription.SherpaTranscriber
+import de.open2ndbrain.transcription.WordErrorRate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -68,32 +69,8 @@ sealed interface MicTestState {
 
 /** Reine Logik des Mikrofon-Tests (unit-getestet). */
 object MicTestScoring {
-    private val PUNCT = Regex("""[^\p{L}\p{N}\s]""")
-    private val SPACE = Regex("""\s+""")
-
-    fun normalizeWords(text: String): List<String> =
-        text.lowercase().replace('-', ' ').replace(PUNCT, " ").replace(SPACE, " ").trim().split(' ').filter { it.isNotEmpty() }
-
-    /**
-     * Wortfehlerrate (Ersetzungen + Auslassungen + Einfügungen) / Referenzwörter, in Prozent.
-     * Hinweis: Wird durch `WordErrorRate.compute` des ML-Agenten ersetzt, sobald verfügbar (gleiche Normalisierung).
-     */
-    fun werPct(reference: String, hypothesis: String): Double {
-        val r = normalizeWords(reference)
-        val h = normalizeWords(hypothesis)
-        if (r.isEmpty()) return if (h.isEmpty()) 0.0 else 100.0
-        var prev = IntArray(h.size + 1) { it }
-        for (i in 1..r.size) {
-            val cur = IntArray(h.size + 1)
-            cur[0] = i
-            for (j in 1..h.size) {
-                val sub = prev[j - 1] + if (r[i - 1] == h[j - 1]) 0 else 1
-                cur[j] = minOf(sub, prev[j] + 1, cur[j - 1] + 1)
-            }
-            prev = cur
-        }
-        return prev[h.size] * 100.0 / r.size
-    }
+    /** Wortfehlerrate in Prozent (0 = perfekt), über `WordErrorRate.compute` (ML-Agent, gleiche Normalisierung überall). */
+    fun werPct(reference: String, hypothesis: String): Double = WordErrorRate.compute(reference, hypothesis).wer * 100.0
 
     /**
      * Empfehlung: niedrigste Fehlerrate; liegen zwei Modelle innerhalb von [TIE_PCT] Prozentpunkten, gewinnt das
@@ -108,40 +85,26 @@ object MicTestScoring {
     enum class Mark { Ok, Wrong, Missing, Extra }
 
     /**
-     * Wortweise Ausrichtung (Levenshtein mit Rückverfolgung) für die Anzeige: richtig, falsch (ersetzt), fehlt
-     * (nur im Vorlesetext) oder zusätzlich (nur im erkannten Text). Wörter in Schreibweise der Erkennung, fehlende in
-     * der des Vorlesetexts.
+     * Wortweise Markierung für die Anzeige aus der Ausrichtung von `WordErrorRate`: richtig, falsch (ersetzt; Wort der
+     * Erkennung), fehlt (Wort des Vorlesetexts) oder zusätzlich (nur erkannt), in Lesereihenfolge.
      */
     fun align(reference: String, hypothesis: String): List<Pair<String, Mark>> {
-        val r = normalizeWords(reference)
-        val h = normalizeWords(hypothesis)
-        val d = Array(r.size + 1) { IntArray(h.size + 1) }
-        for (i in 0..r.size) d[i][0] = i
-        for (j in 0..h.size) d[0][j] = j
-        for (i in 1..r.size) for (j in 1..h.size) {
-            d[i][j] = minOf(d[i - 1][j - 1] + if (r[i - 1] == h[j - 1]) 0 else 1, d[i - 1][j] + 1, d[i][j - 1] + 1)
-        }
+        val res = WordErrorRate.compute(reference, hypothesis)
+        val byIndex = res.errors.filter { it.type != WordErrorRate.ErrorType.Insertion }.associateBy { it.referenceIndex }
+        val inserts = res.errors.filter { it.type == WordErrorRate.ErrorType.Insertion }.groupBy { it.referenceIndex }
         val out = ArrayList<Pair<String, Mark>>()
-        var i = r.size
-        var j = h.size
-        while (i > 0 || j > 0) {
-            when {
-                i > 0 && j > 0 && d[i][j] == d[i - 1][j - 1] + if (r[i - 1] == h[j - 1]) 0 else 1 -> {
-                    out += h[j - 1] to if (r[i - 1] == h[j - 1]) Mark.Ok else Mark.Wrong
-                    i--
-                    j--
-                }
-                i > 0 && d[i][j] == d[i - 1][j] + 1 -> {
-                    out += r[i - 1] to Mark.Missing
-                    i--
-                }
-                else -> {
-                    out += h[j - 1] to Mark.Extra
-                    j--
-                }
+        fun addInserts(i: Int) = inserts[i]?.forEach { e -> out += (e.hypothesis ?: "") to Mark.Extra }
+        res.referenceWords.forEachIndexed { i, w ->
+            addInserts(i)
+            val e = byIndex[i]
+            out += when (e?.type) {
+                WordErrorRate.ErrorType.Substitution -> (e.hypothesis ?: w) to Mark.Wrong
+                WordErrorRate.ErrorType.Deletion -> w to Mark.Missing
+                else -> w to Mark.Ok
             }
         }
-        return out.asReversed()
+        addInserts(res.referenceWords.size)
+        return out
     }
 
     fun silenceCut(discardSilence: Boolean, storedMs: Long, wallMs: Long): Boolean =

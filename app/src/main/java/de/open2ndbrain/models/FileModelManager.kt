@@ -67,11 +67,9 @@ class FileModelManager(
      * Wird vom Container mit `SystemRecognizerSupport` des ML-Agenten belegt; bis dahin „nicht verfügbar“.
      */
     interface SystemAsr {
-        /** Genauer Zustand (Prüfung kann kurz dauern – nicht auf dem Main-Thread aufrufen, wenn sie blockiert). */
-        fun status(): SystemAsrStatus
-        /** Deutsches Sprachpaket anfordern bzw. die Systemeinstellung dafür öffnen. */
-        fun requestDownload()
-        fun isAvailable(): Boolean = status() == SystemAsrStatus.Ready
+        suspend fun status(): SystemAsrStatus
+        /** Deutsches Sprachpaket anfordern (das System zeigt den Fortschritt). */
+        suspend fun requestDownload()
     }
 
     /**
@@ -80,14 +78,14 @@ class FileModelManager(
      */
     @Volatile
     var systemAsr: SystemAsr = object : SystemAsr {
-        override fun status(): SystemAsrStatus = when {
+        override suspend fun status(): SystemAsrStatus = when {
             android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU -> SystemAsrStatus.Unavailable
             runCatching { android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext) }.getOrDefault(false) ->
                 SystemAsrStatus.Unknown
             else -> SystemAsrStatus.Unavailable
         }
 
-        override fun requestDownload() = Unit
+        override suspend fun requestDownload() = Unit
     }
 
     private val _systemStatus = MutableStateFlow(SystemAsrStatus.Unknown)
@@ -134,8 +132,11 @@ class FileModelManager(
     fun download(id: String, unmeteredOnly: Boolean) {
         val spec = ModelCatalog.byId(id) ?: return
         if (isSystemModel(spec)) {
-            // Keine Dateien: das System lädt das Sprachpaket selbst.
-            systemAsr.requestDownload()
+            // Keine Dateien: das System lädt das Sprachpaket selbst; danach neu prüfen.
+            scope.launch {
+                runCatching { systemAsr.requestDownload() }
+                refreshSystemAsr()
+            }
             return
         }
         if (store.isInstalled(spec)) return
@@ -175,7 +176,7 @@ class FileModelManager(
 
     override fun installedDir(id: String): File? {
         val spec = ModelCatalog.byId(id) ?: return null
-        if (isSystemModel(spec)) return if (systemAsr.isAvailable()) store.dir(spec).apply { mkdirs() } else null
+        if (isSystemModel(spec)) return if (_systemStatus.value == SystemAsrStatus.Ready) store.dir(spec).apply { mkdirs() } else null
         return if (store.isInstalled(spec)) store.dir(spec) else null
     }
 

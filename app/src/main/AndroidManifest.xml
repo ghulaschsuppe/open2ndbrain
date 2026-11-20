@@ -21,6 +21,13 @@
     <!-- Bis Android 11 für SCO-Routing -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
 
+    <!-- Paketsichtbarkeit (Android 11+): Systemerkennung auf dem Gerät finden -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 

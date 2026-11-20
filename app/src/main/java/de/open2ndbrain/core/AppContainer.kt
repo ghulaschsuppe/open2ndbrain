@@ -5,6 +5,8 @@ import de.open2ndbrain.audio.AudioRecordingEngine
 import de.open2ndbrain.audio.FileRecordingRepository
 import de.open2ndbrain.markers.FileMarkerRepository
 import de.open2ndbrain.models.FileModelManager
+import de.open2ndbrain.models.SystemAsrStatus
+import de.open2ndbrain.transcription.SystemRecognizerSupport
 import de.open2ndbrain.service.RecorderStatusHolder
 import de.open2ndbrain.settings.SettingsRepository
 import de.open2ndbrain.speakers.FileSpeakerRepository
@@ -46,7 +48,24 @@ class AppContainer(context: Context) {
 
     /** Sprachmodelle (Download/Import/Löschen); [models] ist die Vertragssicht. */
     val modelManager: FileModelManager by lazy {
-        FileModelManager(appContext, modelsRoot) { transcriptionScheduler.schedule() }
+        FileModelManager(appContext, modelsRoot) { transcriptionScheduler.schedule() }.also { m ->
+            // Systemerkennung (ohne Dateien): Verfügbarkeit und Sprachpaket über SystemRecognizerSupport
+            m.systemAsr = object : FileModelManager.SystemAsr {
+                override suspend fun status(): SystemAsrStatus {
+                    val st = SystemRecognizerSupport.check(appContext)
+                    return when {
+                        st.ready -> SystemAsrStatus.Ready
+                        !st.available -> SystemAsrStatus.Unavailable
+                        else -> SystemAsrStatus.LanguagePackMissing
+                    }
+                }
+
+                override suspend fun requestDownload() {
+                    SystemRecognizerSupport.requestDownload(appContext)
+                }
+            }
+            m.refreshSystemAsr()
+        }
     }
     val models: ModelManager get() = modelManager
 
