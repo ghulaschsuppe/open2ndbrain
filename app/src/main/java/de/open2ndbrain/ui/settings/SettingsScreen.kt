@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
@@ -150,6 +151,9 @@ class SettingsActions(
     val onInterval: (Int) -> Unit = {},
     val onRetention: (Int) -> Unit = {},
     val onDynamicColor: (Boolean) -> Unit = {},
+    val onDenoise: (Boolean) -> Unit = {},
+    val onNightEnabled: (Boolean) -> Unit = {},
+    val onNightModel: (String) -> Unit = {},
     val onOpenLicenses: () -> Unit = {},
 )
 
@@ -164,6 +168,11 @@ fun SettingsContent(
     actions: SettingsActions,
     models: @Composable ColumnScope.() -> Unit,
     modifier: Modifier = Modifier,
+    /** Rauschfilter vor der Erkennung; null = Einstellung (noch) nicht verfügbar. */
+    denoise: Boolean? = null,
+    denoiserInstalled: Boolean = false,
+    /** Nachtqualität; null = (noch) nicht verfügbar. */
+    night: NightQualityUi? = null,
 ) {
     val s = settings
     var pendingRetention by remember { mutableStateOf<Int?>(null) }
@@ -178,12 +187,11 @@ fun SettingsContent(
                     // ---------------------------------------------------------------- Aufnahme
                     SettingsGroup(stringResource(R.string.settings_section_recording)) {
                         SettingHeader(Icons.Filled.HighQuality, stringResource(R.string.settings_bitrate), stringResource(R.string.settings_bitrate_desc))
-                        AppSettings.BITRATE_OPTIONS.forEach { kbps ->
-                            val std = kbps == AppSettings.DEFAULT_BITRATE
+                        AppSettings.BITRATE_OPTIONS.sorted().forEach { kbps ->
                             RadioOption(
                                 selected = s.bitrateKbps == kbps,
-                                title = stringResource(if (std) R.string.settings_bitrate_16 else R.string.settings_bitrate_12),
-                                subtitle = stringResource(if (std) R.string.settings_bitrate_16_desc else R.string.settings_bitrate_12_desc),
+                                title = bitrateTitle(kbps),
+                                subtitle = bitrateDescription(kbps),
                                 onClick = { actions.onBitrate(kbps) },
                             )
                         }
@@ -251,6 +259,17 @@ fun SettingsContent(
                             enabled = speakerModel,
                             onChange = { actions.onSpeakerRecognition(it) },
                         )
+                        if (denoise != null) {
+                            SettingDivider()
+                            SwitchSetting(
+                                Icons.Filled.BlurOn,
+                                stringResource(R.string.settings_denoise),
+                                stringResource(if (denoiserInstalled) R.string.settings_denoise_desc else R.string.settings_denoise_no_model),
+                                checked = denoise && denoiserInstalled,
+                                enabled = denoiserInstalled,
+                                onChange = actions.onDenoise,
+                            )
+                        }
                         SettingDivider()
                         SettingHeader(
                             Icons.Filled.Memory,
@@ -311,6 +330,13 @@ fun SettingsContent(
                                     modifier = Modifier.heightIn(min = 40.dp),
                                 )
                             }
+                        }
+                    }
+
+                    // ---------------------------------------------------------------- Nachtqualität
+                    if (night != null) {
+                        SettingsGroup(stringResource(R.string.night_section)) {
+                            NightQualitySetting(night, actions.onNightEnabled, actions.onNightModel)
                         }
                     }
 
@@ -470,3 +496,22 @@ private fun retentionLabel(days: Int): String =
     if (days == AppSettings.RETENTION_UNLIMITED) stringResource(R.string.settings_retention_unlimited)
     else pluralStringResource(R.plurals.settings_retention_days, days, days)
 
+
+/** „24 kbit/s – Standard“ usw.; Standard ist [AppSettings.DEFAULT_BITRATE]. */
+@Composable
+private fun bitrateTitle(kbps: Int): String {
+    val base = stringResource(R.string.settings_bitrate_value, kbps)
+    return when {
+        kbps == AppSettings.DEFAULT_BITRATE -> stringResource(R.string.settings_bitrate_standard, base)
+        kbps <= 12 -> stringResource(R.string.settings_bitrate_saver, base)
+        else -> base
+    }
+}
+
+@Composable
+private fun bitrateDescription(kbps: Int): String = when {
+    kbps <= 12 -> stringResource(R.string.settings_bitrate_12_desc)
+    kbps <= 16 -> stringResource(R.string.settings_bitrate_16_desc)
+    kbps <= 24 -> stringResource(R.string.settings_bitrate_24_desc)
+    else -> stringResource(R.string.settings_bitrate_32_desc)
+}

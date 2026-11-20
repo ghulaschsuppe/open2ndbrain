@@ -68,6 +68,8 @@ import de.open2ndbrain.R
 import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.TranscriptionStatus
 import de.open2ndbrain.work.TranscriptionRunStat
+import de.open2ndbrain.ui.settings.NightProgress
+import de.open2ndbrain.ui.settings.NightProgressLine
 import de.open2ndbrain.ui.Formatters
 import de.open2ndbrain.ui.components.IconBubble
 import de.open2ndbrain.ui.components.O2bCard
@@ -237,6 +239,7 @@ fun TranscriptionCard(
     status: TranscriptionStatus,
     onTranscribeNow: (() -> Unit)? = null,
     runs: List<TranscriptionRunStat> = emptyList(),
+    night: NightProgress? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
     O2bCard(Modifier.fillMaxWidth().animateContentSize()) {
@@ -274,6 +277,7 @@ fun TranscriptionCard(
                 modifier = Modifier.padding(top = Spacing.xs),
             )
         }
+        night?.let { NightProgressLine(it, Modifier.padding(top = Spacing.sm)) }
         if (runs.isNotEmpty()) RunStats(runs)
         if (onTranscribeNow != null && !status.running) {
             FilledTonalButton(

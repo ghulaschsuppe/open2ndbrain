@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.open2ndbrain.R
 import de.open2ndbrain.core.ModelCatalog
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Tune
 import de.open2ndbrain.core.Marker
 import de.open2ndbrain.core.MarkerType
@@ -213,6 +214,18 @@ private fun ModelProvenance(t: Transcript) {
     }
 }
 
+/** „Nachts verbessert mit …“ – dezente, aber erkennbare Kennzeichnung. */
+@Composable
+private fun ImprovedBadge(modelName: String) {
+    Pill(
+        stringResource(R.string.night_improved_with, modelName),
+        icon = Icons.Filled.Bedtime,
+        container = MaterialTheme.colorScheme.secondaryContainer,
+        content = MaterialTheme.colorScheme.onSecondaryContainer,
+        maxLines = 2,
+    )
+}
+
 private val LONG_DATE = DateTimeFormatter.ofPattern("EEEE, d. MMMM yyyy", Locale.GERMAN)
 
 private fun longDate(epochMs: Long): String = LONG_DATE.format(Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault()))
@@ -234,6 +247,8 @@ fun RecordingDetailContent(
     onSeek: (Long) -> Unit,
     onBookmarkClick: (Marker) -> Unit,
     modifier: Modifier = Modifier,
+    /** Nachtqualität: Name des Modells, mit dem dieses Transkript nachts verbessert wurde (null = nicht verbessert). */
+    improvedWith: String? = null,
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val isCurrentFile = player.file == recording.audio
@@ -269,7 +284,7 @@ fun RecordingDetailContent(
                         }
                         if (participants.isNotEmpty()) ParticipantsRow(participants)
                         if (bookmarks.isNotEmpty()) BookmarkChips(bookmarks, onBookmarkClick)
-                        transcript?.let { ModelProvenance(it) }
+                        if (improvedWith != null) ImprovedBadge(improvedWith) else transcript?.let { ModelProvenance(it) }
                         if (!audioExists) InfoNote(stringResource(R.string.detail_audio_deleted))
                     }
                 },
