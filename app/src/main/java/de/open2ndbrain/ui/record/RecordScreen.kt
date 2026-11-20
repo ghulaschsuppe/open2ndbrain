@@ -84,6 +84,8 @@ import de.open2ndbrain.ui.settings.UpgradeCard
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.filled.Star
 import de.open2ndbrain.work.TranscriptionRunStat
+import de.open2ndbrain.ui.mictest.MicTestEntryCard
+import de.open2ndbrain.ui.settings.NightProgress
 import de.open2ndbrain.service.DisplayStatus
 import de.open2ndbrain.service.RecorderNotifications
 import de.open2ndbrain.service.isStorageFull
@@ -104,7 +106,14 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun RecordScreen(modifier: Modifier = Modifier, onOpenModels: () -> Unit = {}, vm: RecordViewModel = viewModel()) {
+fun RecordScreen(
+    modifier: Modifier = Modifier,
+    onOpenModels: () -> Unit = {},
+    onOpenMicTest: () -> Unit = {},
+    vm: RecordViewModel = viewModel(),
+) {
+    val night by vm.night.collectAsStateWithLifecycle()
+    val showMicTestCard by vm.showMicTestCard.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val meeting by vm.meeting.collectAsStateWithLifecycle()
     val transcription by vm.transcription.collectAsStateWithLifecycle()
@@ -135,6 +144,8 @@ fun RecordScreen(modifier: Modifier = Modifier, onOpenModels: () -> Unit = {}, v
         modelHint = modelHint,
         modifier = modifier,
         runs = runs,
+        night = night,
+        showMicTestCard = showMicTestCard,
         actions = RecordActions(
             onToggle = { if (state.serviceRunning) vm.stop() else startWithPermission() },
             onPause = vm::pause,
@@ -154,6 +165,8 @@ fun RecordScreen(modifier: Modifier = Modifier, onOpenModels: () -> Unit = {}, v
             onOpenModels = onOpenModels,
             onAcceptUpgrade = { modelsVm.acceptUpgrade(it) },
             onDismissModelHint = { modelsVm.dismissUpgrade() },
+            onMicTest = onOpenMicTest,
+            onDismissMicTest = { vm.dismissMicTestCard() },
         ),
     )
 
@@ -186,6 +199,9 @@ class RecordActions(
     val onOpenModels: () -> Unit = {},
     val onAcceptUpgrade: (unmeteredOnly: Boolean) -> Unit = {},
     val onDismissModelHint: () -> Unit = {},
+    /** null = Mikrofon-Test (noch) nicht verfügbar → Karte ausgeblendet. */
+    val onMicTest: (() -> Unit)? = null,
+    val onDismissMicTest: () -> Unit = {},
 )
 
 /** „Jetzt“: Aufnahme-Knopf als Hero, Status- und Mikrofon-Chip, Kennzahlen, Meeting/Merken, Transkription. */
@@ -198,6 +214,8 @@ fun RecordContent(
     actions: RecordActions,
     modifier: Modifier = Modifier,
     runs: List<TranscriptionRunStat> = emptyList(),
+    night: NightProgress? = null,
+    showMicTestCard: Boolean = false,
     modelHint: ModelSpec? = null,
 ) {
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
@@ -214,6 +232,10 @@ fun RecordContent(
                     HeroSection(state, actions)
 
                     if (modelHint != null) UpgradeCard(modelHint, actions.onAcceptUpgrade, actions.onDismissModelHint, onOpen = actions.onOpenModels)
+                    val micTest = actions.onMicTest
+                    if (showMicTestCard && modelHint == null && micTest != null) {
+                        MicTestEntryCard(onStart = micTest, onDismiss = actions.onDismissMicTest)
+                    }
 
                     AnimatedVisibility(visible = problem != null) {
                         problem?.let { ProblemCard(it, actions.onOpenAppSettings) }
@@ -231,7 +253,7 @@ fun RecordContent(
 
                     StatsRow(state)
 
-                    TranscriptionCard(transcription, onTranscribeNow = actions.onTranscribeNow, runs = runs)
+                    TranscriptionCard(transcription, onTranscribeNow = actions.onTranscribeNow, runs = runs, night = night)
                 }
             }
         }

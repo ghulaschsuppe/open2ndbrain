@@ -137,6 +137,18 @@ class RecordViewModel(application: Application) : AndroidViewModel(application) 
     /** „Jetzt transkribieren“: aktuelle Datei abschließen und sofort verarbeiten („Nur beim Laden“ einmalig ignoriert). */
     fun transcribeNow() = container.transcriptionScheduler.transcribeNow()
 
+    /** Zeile „Nachtqualität: 12 von 30 verbessert“ in der Transkriptions-Karte (null = ausblenden). */
+    val night: StateFlow<de.open2ndbrain.ui.settings.NightProgress?> = container.nightQuality.status
+        .map { de.open2ndbrain.ui.settings.nightProgress(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Karte „Welches Modell passt zu dir?“: mindestens ein Modell installiert, noch kein Test, nicht ausgeblendet. */
+    val showMicTestCard: StateFlow<Boolean> = combine(container.settings.settings, container.modelManager.states, container.micTest.history) { s, st, h ->
+        !s.micTestCardDismissed && h.isEmpty() && de.open2ndbrain.core.ModelCatalog.asrModels.any { st[it.id] is de.open2ndbrain.core.ModelState.Installed }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    fun dismissMicTestCard() = viewModelScope.launch { container.settings.dismissMicTestCard() }
+
     /** Diagnose: letzte Transkriptionsläufe (Echtzeitfaktor, Ladezeit, Threads, Gerät). */
     val transcriptionStats: StateFlow<List<TranscriptionRunStat>> = container.transcriptionStats.runs
 

@@ -49,6 +49,9 @@ sealed interface ImportState {
  * [ModelManager] auf Dateisystem-Basis. Downloads laufen in [ModelDownloadWorker] (WorkManager), der Zustand
  * wird beim Start aus dem Dateisystem rekonstruiert und während eines Downloads vom Worker aktualisiert.
  */
+/** Zustand der experimentellen Systemerkennung. */
+enum class SystemAsrStatus { Unknown, Unavailable, LanguagePackMissing, Ready }
+
 class FileModelManager(
     context: Context,
     root: File,
@@ -64,14 +67,39 @@ class FileModelManager(
      * Wird vom Container mit `SystemRecognizerSupport` des ML-Agenten belegt; bis dahin „nicht verfügbar“.
      */
     interface SystemAsr {
-        fun isAvailable(): Boolean
+        /** Genauer Zustand (Prüfung kann kurz dauern – nicht auf dem Main-Thread aufrufen, wenn sie blockiert). */
+        fun status(): SystemAsrStatus
+        /** Deutsches Sprachpaket anfordern bzw. die Systemeinstellung dafür öffnen. */
         fun requestDownload()
+        fun isAvailable(): Boolean = status() == SystemAsrStatus.Ready
     }
 
+    /**
+     * Grobe Standardprüfung, bis `SystemRecognizerSupport` (ML) eingehängt ist: vor Android 13 oder ohne
+     * On-Device-Erkennung „nicht verfügbar“, sonst „unbekannt“ (Sprachpaket nicht geprüft → nicht nutzbar).
+     */
     @Volatile
     var systemAsr: SystemAsr = object : SystemAsr {
-        override fun isAvailable() = false
+        override fun status(): SystemAsrStatus = when {
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU -> SystemAsrStatus.Unavailable
+            runCatching { android.speech.SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext) }.getOrDefault(false) ->
+                SystemAsrStatus.Unknown
+            else -> SystemAsrStatus.Unavailable
+        }
+
         override fun requestDownload() = Unit
+    }
+
+    private val _systemStatus = MutableStateFlow(SystemAsrStatus.Unknown)
+    /** Zustand der Systemerkennung für die Anzeige; [refreshSystemAsr] aktualisiert ihn. */
+    val systemStatus: StateFlow<SystemAsrStatus> = _systemStatus.asStateFlow()
+
+    /** Systemerkennung neu prüfen (z. B. beim Öffnen der Modellseite, nach dem Sprachpaket-Download). */
+    fun refreshSystemAsr() {
+        scope.launch {
+            _systemStatus.value = runCatching { systemAsr.status() }.getOrDefault(SystemAsrStatus.Unavailable)
+            refresh(ModelCatalog.ANDROID_SYSTEM.id)
+        }
     }
 
     private val fsStates = MutableStateFlow(readFileSystem())

@@ -53,13 +53,15 @@ data class MicTestResult(
     val recommendedModelId: String?,
     /** Mikrofon während des Tests (Name), falls bekannt. */
     val input: String? = null,
+    /** Situation, die der Nutzer gewählt hat (z. B. „Table“, „Pocket“) – frei, von der UI vergeben. */
+    val situation: String? = null,
 )
 
 sealed interface MicTestState {
     data object Idle : MicTestState
-    data class Recording(val textIndex: Int, val startedAt: Long) : MicTestState
+    data class Recording(val textIndex: Int, val startedAt: Long, val situation: String? = null) : MicTestState
     /** Wartet auf den Abschluss der Testdatei bzw. rechnet Modell [step] von [totalSteps]. */
-    data class Processing(val textIndex: Int, val step: Int, val totalSteps: Int, val modelId: String?) : MicTestState
+    data class Processing(val textIndex: Int, val step: Int, val totalSteps: Int, val modelId: String?, val progress: Float = 0f) : MicTestState
     data class Done(val result: MicTestResult) : MicTestState
     data class Failed(val message: String) : MicTestState
 }
@@ -102,6 +104,46 @@ object MicTestScoring {
         return results.filter { it.werPct - best.werPct <= TIE_PCT }.minByOrNull { it.processingMs }
     }
 
+    /** Wort im erkannten Text, verglichen mit dem Vorlesetext. */
+    enum class Mark { Ok, Wrong, Missing, Extra }
+
+    /**
+     * Wortweise Ausrichtung (Levenshtein mit Rückverfolgung) für die Anzeige: richtig, falsch (ersetzt), fehlt
+     * (nur im Vorlesetext) oder zusätzlich (nur im erkannten Text). Wörter in Schreibweise der Erkennung, fehlende in
+     * der des Vorlesetexts.
+     */
+    fun align(reference: String, hypothesis: String): List<Pair<String, Mark>> {
+        val r = normalizeWords(reference)
+        val h = normalizeWords(hypothesis)
+        val d = Array(r.size + 1) { IntArray(h.size + 1) }
+        for (i in 0..r.size) d[i][0] = i
+        for (j in 0..h.size) d[0][j] = j
+        for (i in 1..r.size) for (j in 1..h.size) {
+            d[i][j] = minOf(d[i - 1][j - 1] + if (r[i - 1] == h[j - 1]) 0 else 1, d[i - 1][j] + 1, d[i][j - 1] + 1)
+        }
+        val out = ArrayList<Pair<String, Mark>>()
+        var i = r.size
+        var j = h.size
+        while (i > 0 || j > 0) {
+            when {
+                i > 0 && j > 0 && d[i][j] == d[i - 1][j - 1] + if (r[i - 1] == h[j - 1]) 0 else 1 -> {
+                    out += h[j - 1] to if (r[i - 1] == h[j - 1]) Mark.Ok else Mark.Wrong
+                    i--
+                    j--
+                }
+                i > 0 && d[i][j] == d[i - 1][j] + 1 -> {
+                    out += r[i - 1] to Mark.Missing
+                    i--
+                }
+                else -> {
+                    out += h[j - 1] to Mark.Extra
+                    j--
+                }
+            }
+        }
+        return out.asReversed()
+    }
+
     fun silenceCut(discardSilence: Boolean, storedMs: Long, wallMs: Long): Boolean =
         discardSilence && wallMs > 10_000 && storedMs < wallMs * SILENCE_CUT_RATIO
 
@@ -131,11 +173,14 @@ class MicTest(private val context: Context, private val c: AppContainer) {
     val texts: List<String> get() = TEXT_IDS.map { context.getString(it) }
 
     /** Test beginnen (die Aufnahme muss laufen): laufende Datei abschließen, damit der Test sauber beginnt. */
-    fun begin(textIndex: Int) {
+    fun begin(textIndex: Int, situation: String? = null) {
         require(textIndex in TEXT_IDS.indices)
         c.recordingEngine.splitNow("mic_test_start")
-        _state.value = MicTestState.Recording(textIndex, System.currentTimeMillis())
+        _state.value = MicTestState.Recording(textIndex, System.currentTimeMillis(), situation)
     }
+
+    /** Nächster Vorlesetext (wechselt von Test zu Test). */
+    fun nextTextIndex(): Int = _history.value.size % TEXT_IDS.size
 
     fun cancel() {
         job?.cancel()
@@ -199,7 +244,9 @@ class MicTest(private val context: Context, private val c: AppContainer) {
                 val list = ArrayList<MicTestModelResult>()
                 models.forEachIndexed { i, spec ->
                     _state.value = MicTestState.Processing(rec.textIndex, i + 1, totalSteps, spec.id)
-                    runModel(spec.id, vad, null, copies, range, reference, s.effectiveThreads())?.let { list += it }
+                    runModel(spec.id, vad, null, copies, range, reference, s.effectiveThreads()) { p ->
+                        _state.value = MicTestState.Processing(rec.textIndex, i + 1, totalSteps, spec.id, p)
+                    }?.let { list += it }
                 }
                 if (denoiseVariant && denoiser != null) {
                     MicTestScoring.recommend(list)?.let { best ->
@@ -218,6 +265,7 @@ class MicTest(private val context: Context, private val c: AppContainer) {
                 results = results.sortedBy { it.werPct },
                 recommendedModelId = MicTestScoring.recommend(results)?.modelId,
                 input = c.recordingEngine.state.value.currentInput?.name,
+                situation = rec.situation,
             )
             addHistory(result)
             return result
@@ -234,6 +282,7 @@ class MicTest(private val context: Context, private val c: AppContainer) {
         range: LongRange,
         reference: String,
         threads: Int,
+        onProgress: (Float) -> Unit = {},
     ): MicTestModelResult? {
         val spec = ModelCatalog.byId(modelId) ?: return null
         val dir = c.modelManager.installedDir(modelId) ?: return null
@@ -242,8 +291,10 @@ class MicTest(private val context: Context, private val c: AppContainer) {
         return try {
             var processing = 0L
             val text = StringBuilder()
-            for (f in files) {
-                val t = runInterruptible(Dispatchers.Default) { transcriber.transcribe(f) }
+            for ((k, f) in files.withIndex()) {
+                val t = runInterruptible(Dispatchers.Default) {
+                    transcriber.transcribe(f) { p -> onProgress((k + p) / files.size) }
+                }
                 processing += t.processingMs
                 t.utterances.filter { it.startEpochMs in range }.forEach { text.append(it.text).append(' ') }
             }

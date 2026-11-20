@@ -200,6 +200,15 @@ class RecordingsViewModel(application: Application) : AndroidViewModel(applicati
         .map { st -> de.open2ndbrain.core.ModelCatalog.asrModels.filter { st[it.id] is de.open2ndbrain.core.ModelState.Installed } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    private val activeAsrModel: StateFlow<String?> = combine(container.settings.settings, container.modelManager.states) { s, st ->
+        de.open2ndbrain.models.AsrSelection.effective(s.asrModelId, de.open2ndbrain.models.AsrSelection.installedIds(st))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** „Nachts verbessert mit <Modell>“ für das angezeigte Transkript (null = normale Herkunftszeile). */
+    val improvedWith: StateFlow<String?> = combine(selectedTranscript, container.nightQuality.status, activeAsrModel) { t, night, active ->
+        de.open2ndbrain.ui.settings.improvedWith(t, night, active)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     /** Vergleich: diese Aufnahme mit [modelId] neu transkribieren (wird vorgezogen). */
     fun retranscribeWith(recording: RecordingFile, modelId: String) = viewModelScope.launch { retranscription.one(recording, modelId) }
 

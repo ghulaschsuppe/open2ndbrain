@@ -22,6 +22,16 @@ import de.open2ndbrain.ui.recordings.RetranscribeSheetContent
 import de.open2ndbrain.ui.settings.AsrModelsContent
 import de.open2ndbrain.ui.settings.LinkSetting
 import de.open2ndbrain.ui.models.AsrModelItem
+import de.open2ndbrain.ui.mictest.MicSituation
+import de.open2ndbrain.ui.mictest.MicTestActions
+import de.open2ndbrain.ui.mictest.MicTestContent
+import de.open2ndbrain.ui.mictest.MicTestHistoryEntry
+import de.open2ndbrain.ui.mictest.MicTestResult
+import de.open2ndbrain.ui.mictest.MicTestUi
+import de.open2ndbrain.ui.mictest.WordMark
+import de.open2ndbrain.ui.settings.NightProgress
+import de.open2ndbrain.ui.settings.NightQualityUi
+import de.open2ndbrain.ui.settings.SystemAsrState
 import de.open2ndbrain.ui.settings.RetranscribeOfferContent
 import de.open2ndbrain.work.Retranscription
 import androidx.compose.foundation.layout.size
@@ -59,7 +69,7 @@ class ScreensScreenshotTest {
     @Composable
     private fun Now() = RecordContent(
         RecordSamples.recording, RecordSamples.meeting, RecordSamples.transcribing, null, RecordActions(onTranscribeNow = {}),
-        modelHint = ModelCatalog.DE_FASTCONFORMER,
+        night = NightProgress(12, 30, ModelCatalog.CANARY_180M_DE.displayName),
         runs = listOf(TranscriptionRunStat(0, "2025-11-19_12-00.ogg", 1_800_000, 252_000, 3_400, 4, "service", "Pixel 8 (Tensor G3)")),
     )
 
@@ -68,6 +78,19 @@ class ScreensScreenshotTest {
 
     @Config(qualifiers = "w400dp-h1240dp-xhdpi")
     @Test fun jetztHell() = compose.snapshot("1-jetzt", dark = false) { Now() }
+
+    @Config(qualifiers = "w400dp-h1240dp-xhdpi")
+    @Test fun jetztVorschlagHell() = compose.snapshot("1-jetzt-vorschlag", dark = false) {
+        RecordContent(
+            RecordSamples.off, null, TranscriptionStatus(), null,
+            RecordActions(onTranscribeNow = {}, onMicTest = {}), modelHint = ModelCatalog.DE_FASTCONFORMER,
+        )
+    }
+
+    @Config(qualifiers = "w400dp-h1240dp-xhdpi")
+    @Test fun jetztTestKarteDunkel() = compose.snapshot("1-jetzt-mikrofontest", dark = true) {
+        RecordContent(RecordSamples.off, null, TranscriptionStatus(), null, RecordActions(onMicTest = {}), showMicTestCard = true)
+    }
 
     @Config(qualifiers = "w400dp-h1240dp-xhdpi")
     @Test fun jetztAusHell() = compose.snapshot("1-jetzt-aus", dark = false) {
@@ -107,6 +130,7 @@ class ScreensScreenshotTest {
         onToggle = {},
         onSeek = {},
         onBookmarkClick = {},
+        improvedWith = ModelCatalog.CANARY_180M_DE.displayName,
     )
 
     @Test fun transkriptDunkel() = compose.snapshot("3-transkript", dark = true) { Detail() }
@@ -154,16 +178,64 @@ class ScreensScreenshotTest {
                 AsrModelItem(ModelCatalog.CANARY_180M_DE, ModelState.NotInstalled, 0, false, chosen = false, active = false),
                 AsrModelItem(ModelCatalog.PARAKEET_V3, ModelState.Installed(File("/x")), 0, false, chosen = false, active = true),
                 AsrModelItem(ModelCatalog.WHISPER_SMALL, ModelState.Installed(File("/x")), 0, false, chosen = false, active = false),
+                AsrModelItem(ModelCatalog.ANDROID_SYSTEM, ModelState.NotInstalled, 0, false, chosen = false, active = false),
             ),
             others = listOf(
                 ModelCatalog.SILERO_VAD to ModelState.Installed(File("/x")),
                 ModelCatalog.WESPEAKER_RESNET34 to ModelState.NotInstalled,
+                ModelCatalog.GTCRN_DENOISER to ModelState.NotInstalled,
             ),
             installedBytes = 1_090_000_000,
+            system = SystemAsrState.LanguagePackMissing,
         ),
-        actions = ModelsActions(),
+        actions = ModelsActions(onMicTest = {}),
         onBack = {},
     )
+
+    private val history = listOf(
+        MicTestHistoryEntry(1_763_640_000_000, MicSituation.Table, ModelCatalog.DE_FASTCONFORMER.displayName, 8.4),
+        MicTestHistoryEntry(1_763_380_000_000, MicSituation.Headset, ModelCatalog.CANARY_180M_DE.displayName, 3.1),
+    )
+
+    @Test fun mikrofonTestEinleitung() = compose.snapshot("10-mikrofontest-1-einleitung", dark = true) {
+        MicTestContent(MicTestUi.Intro(MicSituation.Table, history), MicTestActions(), onBack = {})
+    }
+
+    @Test fun mikrofonTestLesen() = compose.snapshot("10-mikrofontest-2-lesen", dark = false) {
+        MicTestContent(
+            MicTestUi.Reading(androidx.compose.ui.res.stringResource(de.open2ndbrain.R.string.mictest_text), 14_000, 0.62f, true),
+            MicTestActions(), onBack = {},
+        )
+    }
+
+    @Test fun mikrofonTestAuswertung() = compose.snapshot("10-mikrofontest-3-auswertung", dark = true) {
+        MicTestContent(MicTestUi.Evaluating(ModelCatalog.CANARY_180M_DE.displayName, 2, 3, 0.55f), MicTestActions(), onBack = {})
+    }
+
+    private fun w(t: String, k: WordMark.Kind = WordMark.Kind.Ok) = WordMark(t, k)
+
+    @Config(qualifiers = "w400dp-h1500dp-xhdpi")
+    @Test fun mikrofonTestErgebnis() = compose.snapshot("10-mikrofontest-4-ergebnis", dark = false) {
+        val words = listOf(
+            w("Am"), w("Dienstag"), w("treffen"), w("wir"), w("uns"), w("um"), w("halb"), w("zehn"), w("im"), w("Büro"),
+            w("in"), w("der"), w("Linden", WordMark.Kind.Wrong), w("Straße", WordMark.Kind.Extra), w("Frau"), w("Schröder", WordMark.Kind.Wrong),
+            w("bringt"), w("die"), w("Unterlagen"), w("für"), w("das"), w("neue", WordMark.Kind.Missing), w("Projekt"), w("mit"),
+        )
+        MicTestContent(
+            MicTestUi.Result(
+                results = listOf(
+                    MicTestResult(ModelCatalog.DE_FASTCONFORMER, 8.4, 900, 31_000, words, active = true),
+                    MicTestResult(ModelCatalog.CANARY_180M_DE, 4.2, 2_700, 31_000, words),
+                    MicTestResult(ModelCatalog.PARAKEET_V3, 27.0, 5_200, 31_000, words),
+                ),
+                bestId = ModelCatalog.CANARY_180M_DE.id,
+                situation = MicSituation.Table,
+                history = history,
+                openId = ModelCatalog.DE_FASTCONFORMER.id,
+            ),
+            MicTestActions(), onBack = {},
+        )
+    }
 
     @Test fun neuErstellenAngebot() = compose.snapshot("8-neu-erstellen-angebot", dark = false) {
         androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().padding(24.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
@@ -222,15 +294,23 @@ class ScreensScreenshotTest {
         batteryIgnored = false,
         dynamicColor = false,
         actions = SettingsActions(),
+        denoise = false,
+        denoiserInstalled = true,
+        night = NightQualityUi(
+            enabled = true,
+            modelId = ModelCatalog.CANARY_180M_DE.id,
+            candidates = listOf(ModelCatalog.CANARY_180M_DE, ModelCatalog.DE_FASTCONFORMER),
+            progress = NightProgress(12, 30, ModelCatalog.CANARY_180M_DE.displayName),
+        ),
         models = {
             LinkSetting(Icons.Filled.RecordVoiceOver, "Spracherkennung", "Geladen: Deutsch – schnell (FastConformer)") {}
         },
     )
 
-    @Config(qualifiers = "w400dp-h2400dp-xhdpi")
+    @Config(qualifiers = "w400dp-h3200dp-xhdpi")
     @Test fun einstellungenDunkel() = compose.snapshot("6-einstellungen", dark = true) { Settings() }
 
-    @Config(qualifiers = "w400dp-h2400dp-xhdpi")
+    @Config(qualifiers = "w400dp-h3200dp-xhdpi")
     @Test fun einstellungenHell() = compose.snapshot("6-einstellungen", dark = false) { Settings() }
 
     @Test fun einrichtungDunkel() = compose.snapshot("7-einrichtung", dark = true) { OnboardingScreen(onFinished = {}) }

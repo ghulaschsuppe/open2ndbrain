@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import de.open2ndbrain.work.NightQuality
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -93,6 +95,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setNightDays(days: Int) = launch { container.settings.setNightQualityDays(days) }
 
     fun refreshNightQuality() = launch { container.nightQuality.refresh() }
+
+    /** Zustand für [NightQualitySetting] (Design): an/aus, Modell, Auswahl, Fortschritt. */
+    val nightUi: StateFlow<NightQualityUi> = combine(container.settings.settings, nightModelOptions, nightQuality) { s, options, st ->
+        NightQualityUi(
+            enabled = s.nightQuality,
+            modelId = st.modelId ?: NightQuality.model(s, options.mapTo(HashSet()) { it.id }),
+            candidates = options,
+            progress = nightProgress(st),
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NightQualityUi(false, null, emptyList()))
+
+    val denoiserInstalled: StateFlow<Boolean> = container.modelManager.states
+        .map { it[de.open2ndbrain.core.ModelCatalog.GTCRN_DENOISER.id] is de.open2ndbrain.core.ModelState.Installed }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     fun download(id: String, unmeteredOnly: Boolean) = models.download(id, unmeteredOnly)
     fun downloadAll(unmeteredOnly: Boolean) = models.downloadAll(unmeteredOnly)

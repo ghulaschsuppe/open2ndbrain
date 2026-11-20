@@ -57,6 +57,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.open2ndbrain.R
+import de.open2ndbrain.core.AsrEngine
+import de.open2ndbrain.ui.mictest.MicTestEntryCard
 import de.open2ndbrain.ui.models.AsrModelItem
 import de.open2ndbrain.ui.models.ModelsViewModel
 import de.open2ndbrain.ui.components.StatusDot
@@ -90,6 +92,8 @@ data class ModelsUi(
     val installedBytes: Long = 0,
     val upgrade: ModelSpec? = null,
     val importState: ImportState? = null,
+    /** Zustand der experimentellen Systemerkennung; null = lokal grob geprüft. */
+    val system: SystemAsrState? = null,
 )
 
 /** Aktionen der Modellseite. */
@@ -102,11 +106,15 @@ class ModelsActions(
     val onAcceptUpgrade: (unmeteredOnly: Boolean) -> Unit = {},
     val onDismissUpgrade: () -> Unit = {},
     val onImport: (List<android.net.Uri>) -> Unit = {},
+    /** Sprachpaket der Systemerkennung laden (öffnet die Systemeinstellung). */
+    val onSystemLanguagePack: () -> Unit = {},
+    /** null = Mikrofon-Test (noch) nicht verfügbar. */
+    val onMicTest: (() -> Unit)? = null,
 )
 
 /** Seite „Spracherkennung“, verdrahtet mit dem [ModelsViewModel] des App-Agenten. */
 @Composable
-fun AsrModelsScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: ModelsViewModel = viewModel()) {
+fun AsrModelsScreen(onBack: () -> Unit, modifier: Modifier = Modifier, onMicTest: (() -> Unit)? = null, vm: ModelsViewModel = viewModel()) {
     val asr by vm.asrModels.collectAsStateWithLifecycle()
     val others by vm.otherModels.collectAsStateWithLifecycle()
     val bytes by vm.installedBytes.collectAsStateWithLifecycle()
@@ -115,7 +123,7 @@ fun AsrModelsScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: Model
     val offer by vm.offerRetranscribe.collectAsStateWithLifecycle()
 
     AsrModelsContent(
-        ui = ModelsUi(asr, others, bytes, upgrade, importState),
+        ui = ModelsUi(asr, others, bytes, upgrade, importState, system = vm.systemState.collectAsStateWithLifecycle().value),
         actions = ModelsActions(
             onDownload = { spec, wifi -> vm.download(spec.id, wifi) },
             onCancel = vm::cancel,
@@ -124,6 +132,8 @@ fun AsrModelsScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: Model
             onAcceptUpgrade = vm::acceptUpgrade,
             onDismissUpgrade = { vm.dismissUpgrade() },
             onImport = vm::import,
+            onSystemLanguagePack = vm::requestSystemLanguagePack,
+            onMicTest = onMicTest,
         ),
         onBack = onBack,
         modifier = modifier,
@@ -171,10 +181,12 @@ fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, m
                     }
                 }
                 item(key = "intro") { IntroCard() }
+                actions.onMicTest?.let { start -> item(key = "mictest") { MicTestEntryCard(onStart = start) } }
                 item(key = "asr-label") {
                     SectionLabel(stringResource(R.string.asr_section), modifier = Modifier.padding(start = Spacing.xs, top = Spacing.sm))
                 }
-                items(ui.asr, key = { it.spec.id }) { m ->
+                val system = ui.asr.firstOrNull { it.spec.asrEngine == AsrEngine.AndroidSystem }
+                items(ui.asr.filter { it.spec.asrEngine != AsrEngine.AndroidSystem }, key = { it.spec.id }) { m ->
                     AsrModelCard(
                         item = m,
                         activeName = activeName,
@@ -184,6 +196,16 @@ fun AsrModelsContent(ui: ModelsUi, actions: ModelsActions, onBack: () -> Unit, m
                         onDelete = { askDelete = m.spec },
                         onActivate = { actions.onActivate(m.spec.id) },
                     )
+                }
+                if (system != null) {
+                    item(key = "system") {
+                        SystemAsrCard(
+                            item = system,
+                            state = ui.system ?: SystemAsrState.Checking,
+                            onActivate = { actions.onActivate(system.spec.id) },
+                            onLanguagePack = actions.onSystemLanguagePack,
+                        )
+                    }
                 }
                 item(key = "others-label") {
                     SectionLabel(stringResource(R.string.models_others), modifier = Modifier.padding(start = Spacing.xs, top = Spacing.md))

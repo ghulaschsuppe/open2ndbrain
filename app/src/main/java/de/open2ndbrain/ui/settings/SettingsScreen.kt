@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BlurOn
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Code
@@ -86,6 +87,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     openModels: Boolean = false,
     onModelsOpened: () -> Unit = {},
+    openMicTest: Boolean = false,
+    onMicTestOpened: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
@@ -96,21 +99,31 @@ fun SettingsScreen(
             onModelsOpened()
         }
     }
-    BackHandler(enabled = page != SettingsPage.Main) { page = SettingsPage.Main }
+    LaunchedEffect(openMicTest) {
+        if (openMicTest) {
+            page = SettingsPage.MicTest
+            onMicTestOpened()
+        }
+    }
+    BackHandler(enabled = page != SettingsPage.Main) { page = if (page == SettingsPage.MicTest) SettingsPage.Models else SettingsPage.Main }
     when (page) {
         SettingsPage.Licenses -> LicensesScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
-        SettingsPage.Models -> AsrModelsScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
+        SettingsPage.Models -> AsrModelsScreen(onBack = { page = SettingsPage.Main }, modifier = modifier, onMicTest = { page = SettingsPage.MicTest })
+        SettingsPage.MicTest -> de.open2ndbrain.ui.mictest.MicTestScreen(onBack = { page = SettingsPage.Models }, modifier = modifier)
         SettingsPage.Main -> SettingsMain(modifier, vm, onOpen = { page = it })
     }
 }
 
-private enum class SettingsPage { Main, Licenses, Models }
+private enum class SettingsPage { Main, Licenses, Models, MicTest }
 
 @Composable
 private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (SettingsPage) -> Unit) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val modelStates by vm.modelStates.collectAsStateWithLifecycle()
     val batteryIgnored by vm.batteryIgnored.collectAsStateWithLifecycle()
+    val night by vm.nightUi.collectAsStateWithLifecycle()
+    val denoiserInstalled by vm.denoiserInstalled.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.refreshNightQuality() }
     val context = LocalContext.current
     val themePrefs = remember { ThemePreferences.get(context) }
     val dynamicColor by themePrefs.dynamicColor.collectAsStateWithLifecycle()
@@ -133,8 +146,14 @@ private fun SettingsMain(modifier: Modifier, vm: SettingsViewModel, onOpen: (Set
             onRetention = { vm.setRetention(it) },
             onDynamicColor = themePrefs::setDynamicColor,
             onOpenLicenses = { onOpen(SettingsPage.Licenses) },
+            onDenoise = { vm.setDenoise(it) },
+            onNightEnabled = { vm.setNightQuality(it) },
+            onNightModel = { vm.setNightModel(it) },
         ),
         models = { ModelsLink(vm, onOpen = { onOpen(SettingsPage.Models) }) },
+        denoise = s.denoiseBeforeAsr,
+        denoiserInstalled = denoiserInstalled,
+        night = night,
         modifier = modifier,
     )
 }
@@ -150,6 +169,9 @@ class SettingsActions(
     val onInterval: (Int) -> Unit = {},
     val onRetention: (Int) -> Unit = {},
     val onDynamicColor: (Boolean) -> Unit = {},
+    val onDenoise: (Boolean) -> Unit = {},
+    val onNightEnabled: (Boolean) -> Unit = {},
+    val onNightModel: (String) -> Unit = {},
     val onOpenLicenses: () -> Unit = {},
 )
 
@@ -164,6 +186,11 @@ fun SettingsContent(
     actions: SettingsActions,
     models: @Composable ColumnScope.() -> Unit,
     modifier: Modifier = Modifier,
+    /** Rauschfilter vor der Erkennung; null = Einstellung (noch) nicht verfügbar. */
+    denoise: Boolean? = null,
+    denoiserInstalled: Boolean = false,
+    /** Nachtqualität; null = (noch) nicht verfügbar. */
+    night: NightQualityUi? = null,
 ) {
     val s = settings
     var pendingRetention by remember { mutableStateOf<Int?>(null) }
@@ -178,11 +205,11 @@ fun SettingsContent(
                     // ---------------------------------------------------------------- Aufnahme
                     SettingsGroup(stringResource(R.string.settings_section_recording)) {
                         SettingHeader(Icons.Filled.HighQuality, stringResource(R.string.settings_bitrate), stringResource(R.string.settings_bitrate_desc))
-                        AppSettings.bitrateOptionsFor(s.bitrateKbps).forEach { kbps ->
+                        AppSettings.bitrateOptionsFor(s.bitrateKbps).sorted().forEach { kbps ->
                             RadioOption(
                                 selected = s.bitrateKbps == kbps,
-                                title = stringResource(de.open2ndbrain.settings.SettingsLabels.bitrateTitle(kbps)),
-                                subtitle = stringResource(de.open2ndbrain.settings.SettingsLabels.bitrateDescription(kbps)),
+                                title = bitrateTitle(kbps),
+                                subtitle = bitrateDescription(kbps),
                                 onClick = { actions.onBitrate(kbps) },
                             )
                         }
@@ -250,6 +277,17 @@ fun SettingsContent(
                             enabled = speakerModel,
                             onChange = { actions.onSpeakerRecognition(it) },
                         )
+                        if (denoise != null) {
+                            SettingDivider()
+                            SwitchSetting(
+                                Icons.Filled.BlurOn,
+                                stringResource(R.string.settings_denoise),
+                                stringResource(if (denoiserInstalled) R.string.settings_denoise_desc else R.string.settings_denoise_no_model),
+                                checked = denoise && denoiserInstalled,
+                                enabled = denoiserInstalled,
+                                onChange = actions.onDenoise,
+                            )
+                        }
                         SettingDivider()
                         SettingHeader(
                             Icons.Filled.Memory,
@@ -310,6 +348,13 @@ fun SettingsContent(
                                     modifier = Modifier.heightIn(min = 40.dp),
                                 )
                             }
+                        }
+                    }
+
+                    // ---------------------------------------------------------------- Nachtqualität
+                    if (night != null) {
+                        SettingsGroup(stringResource(R.string.night_section)) {
+                            NightQualitySetting(night, actions.onNightEnabled, actions.onNightModel)
                         }
                     }
 
@@ -469,3 +514,22 @@ private fun retentionLabel(days: Int): String =
     if (days == AppSettings.RETENTION_UNLIMITED) stringResource(R.string.settings_retention_unlimited)
     else pluralStringResource(R.plurals.settings_retention_days, days, days)
 
+
+/** „24 kbit/s – Standard“ usw.; Standard ist [AppSettings.DEFAULT_BITRATE]. */
+@Composable
+private fun bitrateTitle(kbps: Int): String {
+    val base = stringResource(R.string.settings_bitrate_value, kbps)
+    return when {
+        kbps == AppSettings.DEFAULT_BITRATE -> stringResource(R.string.settings_bitrate_standard, base)
+        kbps <= 12 -> stringResource(R.string.settings_bitrate_saver, base)
+        else -> base
+    }
+}
+
+@Composable
+private fun bitrateDescription(kbps: Int): String = when {
+    kbps <= 12 -> stringResource(R.string.settings_bitrate_12_desc)
+    kbps <= 16 -> stringResource(R.string.settings_bitrate_16_desc)
+    kbps <= 24 -> stringResource(R.string.settings_bitrate_24_desc)
+    else -> stringResource(R.string.settings_bitrate_32_desc)
+}

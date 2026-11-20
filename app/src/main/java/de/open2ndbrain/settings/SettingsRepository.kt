@@ -56,6 +56,8 @@ data class AppSettings(
     val nightQualityModelId: String? = null,
     /** Wie weit zurück die Nachtqualität Aufnahmen verbessert (Tage). */
     val nightQualityDays: Int = DEFAULT_NIGHT_DAYS,
+    /** Karte „Welches Modell passt zu dir?“ im Jetzt-Tab ausgeblendet. */
+    val micTestCardDismissed: Boolean = false,
 ) {
     /** Tatsächlich genutzte Threads für [cores] verfügbare Prozessorkerne. */
     fun effectiveThreads(cores: Int = Runtime.getRuntime().availableProcessors()): Int =
@@ -171,6 +173,7 @@ internal object SettingsKeys {
     val NIGHT_QUALITY = booleanPreferencesKey("night_quality")
     val NIGHT_QUALITY_MODEL = stringPreferencesKey("night_quality_model")
     val NIGHT_QUALITY_DAYS = intPreferencesKey("night_quality_days")
+    val MIC_TEST_CARD_DISMISSED = booleanPreferencesKey("mic_test_card_dismissed")
 
     fun toAppSettings(p: Preferences): AppSettings {
         val defaults = AppSettings()
@@ -200,6 +203,7 @@ internal object SettingsKeys {
             nightQuality = p[NIGHT_QUALITY] ?: false,
             nightQualityModelId = p[NIGHT_QUALITY_MODEL],
             nightQualityDays = p[NIGHT_QUALITY_DAYS]?.takeIf { it in AppSettings.NIGHT_DAYS_OPTIONS } ?: defaults.nightQualityDays,
+            micTestCardDismissed = p[MIC_TEST_CARD_DISMISSED] ?: false,
         )
     }
 }
@@ -265,6 +269,10 @@ class SettingsRepository(context: Context) {
 
     suspend fun setSpeakerRecognition(value: Boolean) {
         store.edit { it[SettingsKeys.SPEAKER_RECOGNITION] = value }
+    }
+
+    suspend fun dismissMicTestCard() {
+        store.edit { it[SettingsKeys.MIC_TEST_CARD_DISMISSED] = true }
     }
 
     suspend fun setDenoiseBeforeAsr(value: Boolean) {

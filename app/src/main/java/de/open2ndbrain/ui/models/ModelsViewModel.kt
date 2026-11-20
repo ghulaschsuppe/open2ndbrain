@@ -89,6 +89,31 @@ class ModelsViewModel(application: Application) : AndroidViewModel(application) 
 
     val importState: StateFlow<ImportState?> = manager.importState
 
+    /** Zustand der experimentellen Systemerkennung (für die SystemAsrCard). */
+    val systemState: StateFlow<de.open2ndbrain.ui.settings.SystemAsrState> = manager.systemStatus
+        .map {
+            when (it) {
+                de.open2ndbrain.models.SystemAsrStatus.Unknown -> de.open2ndbrain.ui.settings.SystemAsrState.Checking
+                de.open2ndbrain.models.SystemAsrStatus.Unavailable -> de.open2ndbrain.ui.settings.SystemAsrState.Unavailable
+                de.open2ndbrain.models.SystemAsrStatus.LanguagePackMissing -> de.open2ndbrain.ui.settings.SystemAsrState.LanguagePackMissing
+                de.open2ndbrain.models.SystemAsrStatus.Ready -> de.open2ndbrain.ui.settings.SystemAsrState.Ready
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), de.open2ndbrain.ui.settings.SystemAsrState.Checking)
+
+    init {
+        manager.refreshSystemAsr()
+    }
+
+    /** Sprachpaket der Systemerkennung anfordern (öffnet ggf. die Systemeinstellung) und danach neu prüfen. */
+    fun requestSystemLanguagePack() {
+        manager.download(ModelCatalog.ANDROID_SYSTEM.id, unmeteredOnly = false)
+        manager.refreshSystemAsr()
+    }
+
+    /** Beim Zurückkehren auf die Seite (z. B. aus den Systemeinstellungen) neu prüfen. */
+    fun refreshSystemAsr() = manager.refreshSystemAsr()
+
     fun download(id: String, unmeteredOnly: Boolean = true) = manager.download(id, unmeteredOnly)
     fun cancel(id: String) = manager.cancel(id)
     fun import(uris: List<Uri>) = manager.import(uris)

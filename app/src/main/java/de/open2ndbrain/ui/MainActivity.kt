@@ -101,6 +101,7 @@ private enum class Tab(@param:StringRes val label: Int, val icon: ImageVector, v
 private fun MainScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.Now) }
     var openModels by rememberSaveable { mutableStateOf(false) }
+    var openMicTest by rememberSaveable { mutableStateOf(false) }
     val content: @Composable (Modifier) -> Unit = { m ->
         TabContent(
             tab = tab,
@@ -111,6 +112,12 @@ private fun MainScaffold() {
                 tab = Tab.Settings
             },
             onModelsOpened = { openModels = false },
+            openMicTest = openMicTest,
+            onOpenMicTest = {
+                openMicTest = true
+                tab = Tab.Settings
+            },
+            onMicTestOpened = { openMicTest = false },
             modifier = m,
         )
     }
@@ -174,6 +181,9 @@ private fun TabContent(
     onSelect: (Tab) -> Unit,
     onOpenModels: () -> Unit,
     onModelsOpened: () -> Unit,
+    openMicTest: Boolean,
+    onOpenMicTest: () -> Unit,
+    onMicTestOpened: () -> Unit,
     modifier: Modifier,
 ) {
     AnimatedContent(
@@ -183,10 +193,15 @@ private fun TabContent(
         modifier = modifier,
     ) { t ->
         when (t) {
-            Tab.Now -> RecordScreen(onOpenModels = onOpenModels)
+            Tab.Now -> RecordScreen(onOpenModels = onOpenModels, onOpenMicTest = onOpenMicTest)
             Tab.Timeline -> RecordingsScreen(onStartRecording = { onSelect(Tab.Now) })
             Tab.Speakers -> SpeakersScreen()
-            Tab.Settings -> SettingsScreen(openModels = openModels, onModelsOpened = onModelsOpened)
+            Tab.Settings -> SettingsScreen(
+                openModels = openModels,
+                onModelsOpened = onModelsOpened,
+                openMicTest = openMicTest,
+                onMicTestOpened = onMicTestOpened,
+            )
         }
     }
 }

@@ -87,13 +87,9 @@
     <string name="settings_section_battery">Akku</string>
     <string name="settings_section_about">Über die App</string>
     <string name="settings_bitrate">Qualität</string>
-    <string name="settings_bitrate_32">32 kbit/s – Standard</string>
     <string name="settings_bitrate_32_desc">Beste Erkennung, ca. 13,6 MB pro Stunde Sprache (mit „Stille verwerfen“ typisch ~55 MB pro Tag)</string>
-    <string name="settings_bitrate_24">24 kbit/s</string>
     <string name="settings_bitrate_24_desc">Sehr gute Erkennung, ca. 10,2 MB pro Stunde Sprache</string>
-    <string name="settings_bitrate_16">16 kbit/s – Sparsam</string>
     <string name="settings_bitrate_16_desc">Spart Speicher, erkennt etwas schlechter; ca. 6,8 MB pro Stunde Sprache</string>
-    <string name="settings_bitrate_12">12 kbit/s – alter Sparmodus</string>
     <string name="settings_bitrate_12_desc">Noch gut verständlich, ca. 5,1 MB pro Stunde Sprache</string>
     <string name="settings_discard_silence">Stille verwerfen</string>
     <string name="settings_discard_silence_desc">Nur Sprachabschnitte speichern (mit kurzem Vor- und Nachlauf). Spart viel Speicher.</string>
@@ -446,6 +442,74 @@ Namensnennung: %2$s</string>
         <item quantity="other">Letzte %1$d Tage</item>
     </plurals>
     <string name="retranscribe_offer_hint">Läuft im Hintergrund, neue Aufnahmen haben Vorrang. Bisherige Transkripte bleiben bis zur Fertigstellung lesbar.</string>
+    <!-- Design: Mikrofon-Test -->
+    <string name="mictest_title">Mikrofon-Test</string>
+    <string name="mictest_subtitle">Welches Modell versteht dich am besten?</string>
+    <string name="mictest_intro_title">So läuft der Test</string>
+    <string name="mictest_intro_text">Du liest einen kurzen Text vor (etwa 30 Sekunden). Danach transkribiert jedes installierte Modell deine Aufnahme, und du siehst, welches dich in deiner echten Situation am besten versteht. Die Aufnahme bleibt auf dem Gerät.</string>
+    <string name="mictest_situation">Wo liegt dein Handy sonst?</string>
+    <string name="mictest_sit_table">Auf dem Tisch</string>
+    <string name="mictest_sit_pocket">In der Tasche</string>
+    <string name="mictest_sit_hand">In der Hand</string>
+    <string name="mictest_sit_headset">Headset</string>
+    <string name="mictest_tip_1">Leg das Handy dorthin, wo es im Alltag liegt – nicht direkt vor den Mund.</string>
+    <string name="mictest_tip_2">Sprich so laut und schnell wie sonst auch. Hintergrundgeräusche dürfen bleiben.</string>
+    <string name="mictest_tip_3">Lies den Text einmal vor und tippe dann auf „Fertig“.</string>
+    <string name="mictest_start">Test starten</string>
+    <string name="mictest_read_hint">Lies diesen Text in normalem Tempo vor:</string>
+    <string name="mictest_text">Am Dienstag treffen wir uns um halb zehn im Büro in der Lindenstraße. Frau Schröder bringt die Unterlagen für das neue Projekt mit, und Jonas fragt noch einmal nach dem Budget von zwölftausend Euro. Danach fahre ich zum Bahnhof, kaufe Brötchen und rufe meine Schwester an, weil sie am Wochenende Geburtstag hat.</string>
+    <string name="mictest_done">Fertig</string>
+    <string name="mictest_evaluating">Modelle hören zu …</string>
+    <string name="mictest_evaluating_model">%1$s (%2$d von %3$d)</string>
+    <string name="mictest_result_title">Dein Ergebnis</string>
+    <string name="mictest_result_text">Getestet: %1$s. Note 1 = fast fehlerfrei, 5 = kaum brauchbar.</string>
+    <string name="mictest_best">Für dich am besten</string>
+    <string name="mictest_compute">Rechenzeit %1$s für %2$s Aufnahme</string>
+    <string name="mictest_wer">%1$s Wortfehler</string>
+    <string name="mictest_show_text">Erkannten Text zeigen</string>
+    <string name="mictest_hide_text">Text ausblenden</string>
+    <string name="mictest_legend">Rot unterstrichen: falsch erkannt · durchgestrichen: ausgelassen · Amber: zu viel</string>
+    <string name="mictest_repeat">Noch einmal testen</string>
+    <string name="mictest_history">Letzte Tests</string>
+    <string name="mictest_grade_desc">Note %1$d, %2$s</string>
+    <string name="mictest_grade_short">Note %1$d</string>
+    <string name="mictest_entry_title">Welches Modell passt zu dir?</string>
+    <string name="mictest_entry_text">Ein kurzer Vorlese-Test zeigt, welches Modell dich in deiner Umgebung am besten versteht.</string>
+    <string name="mictest_entry_action">Testen</string>
+    <string name="grade_1">sehr gut – fast fehlerfrei</string>
+    <string name="grade_2">gut – kleine Fehler</string>
+    <string name="grade_3">befriedigend – gut lesbar</string>
+    <string name="grade_4">ausreichend – viele Fehler</string>
+    <string name="grade_5">mangelhaft – kaum brauchbar</string>
+
+    <!-- Design: Nachtqualität -->
+    <string name="night_section">Nachtqualität</string>
+    <string name="night_title">Nachts in hoher Qualität neu transkribieren</string>
+    <string name="night_desc">Tagsüber schnell, nachts am Ladegerät genau: Die Transkripte des Tages werden mit einem genaueren Modell verbessert.</string>
+    <string name="night_no_model">Dafür bitte zuerst ein genaues Modell laden (z. B. „Deutsch – genau“).</string>
+    <string name="night_day">Tagsüber</string>
+    <string name="night_day_text">schnelles Modell, Transkript nach wenigen Minuten</string>
+    <string name="night_night">Nachts am Ladegerät</string>
+    <string name="night_night_text">genaues Modell ersetzt die Transkripte des Tages</string>
+    <string name="night_model">Modell für die Nacht</string>
+    <string name="night_progress">Nachtqualität: %1$d von %2$d verbessert</string>
+    <string name="night_progress_model">mit %1$s</string>
+    <string name="night_improved_with">Nachts verbessert mit %1$s</string>
+
+    <!-- Design: Systemerkennung, Rauschfilter, Bitrate -->
+    <string name="system_asr_experimental">Experimentell</string>
+    <string name="system_asr_origin">Kommt vom Gerätehersteller und läuft offline auf dem Gerät. Ohne Größenangabe, weil das System das Sprachpaket verwaltet.</string>
+    <string name="system_asr_checking">Verfügbarkeit wird geprüft …</string>
+    <string name="system_asr_unavailable">Auf diesem Gerät nicht verfügbar (ab Android 13 mit Offline-Erkennung).</string>
+    <string name="system_asr_pack_missing">Sprachpaket Deutsch fehlt.</string>
+    <string name="system_asr_pack_action">Sprachpaket laden</string>
+    <string name="system_asr_ready">Bereit.</string>
+    <string name="settings_denoise">Rauschfilter vor der Erkennung</string>
+    <string name="settings_denoise_desc">Filtert Hintergrundgeräusche, bevor transkribiert wird. Hilft bei lauter Umgebung, kann bei ruhigen Aufnahmen aber Wörter verschlucken – im Zweifel aus lassen.</string>
+    <string name="settings_denoise_no_model">Dafür bitte zuerst den „Rauschfilter (GTCRN)“ unter Spracherkennung → Weitere Modelle laden.</string>
+    <string name="settings_bitrate_value">%1$d kbit/s</string>
+    <string name="settings_bitrate_standard">%1$s – Standard</string>
+    <string name="settings_bitrate_saver">%1$s – Sparmodus</string>
     <string name="transcription_last_run">Letzter Lauf: %1$s</string>
     <string name="transcription_load">Laden %1$s</string>
     <string name="transcription_device">Gerät: %1$s</string>
