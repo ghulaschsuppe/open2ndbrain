@@ -7,7 +7,7 @@ import java.io.File
  * Vertrag für die Sprachmodelle. Modelle sind nicht in der APK, sondern werden einmalig geladen
  * (oder vom Nutzer importiert) und liegen danach unter `filesDir/models/<id>/<Dateiname>`.
  */
-enum class ModelKind { Asr, Vad, SpeakerEmbedding }
+enum class ModelKind { Asr, Vad, SpeakerEmbedding, Denoiser }
 
 data class ModelFile(
     val name: String,
@@ -51,6 +51,12 @@ enum class AsrEngine(val hasTokenTimestamps: Boolean) {
     NemoCanary(false),
     /** Whisper, `OfflineWhisperModelConfig` mit language = [ModelSpec.language]. Keine Zeitstempel. */
     Whisper(false),
+    /**
+     * Experimentell: die On-Device-Spracherkennung des Systems (`SpeechRecognizer.createOnDeviceSpeechRecognizer`,
+     * Audio aus Datei über `RecognizerIntent.EXTRA_AUDIO_SOURCE`, ab Android 13). Keine Dateien im Katalog
+     * ([ModelSpec.files] leer) – Verfügbarkeit/Sprachpaket prüft die App zur Laufzeit. Keine Zeitstempel.
+     */
+    AndroidSystem(false),
 }
 
 /**
@@ -180,13 +186,48 @@ object ModelCatalog {
         required = false,
     )
 
+    /** Rauschfilter vor der Erkennung (optional, Messung siehe PHASE2-MESSUNGEN.md). */
+    val GTCRN_DENOISER = ModelSpec(
+        id = "gtcrn-simple-denoiser",
+        displayName = "Rauschfilter (GTCRN)",
+        kind = ModelKind.Denoiser,
+        files = listOf(
+            ModelFile(
+                "gtcrn_simple.onnx",
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/speech-enhancement-models/gtcrn_simple.onnx",
+                "e77603ac0c23dac3227dd2d7135b3a585cbee2679048aecfa886657d3ae1b534", 535_638,
+            ),
+        ),
+        description = "Holt Stimmen aus Hintergrundgeräuschen heraus, bevor transkribiert wird. Sehr klein.",
+        languages = "sprachunabhängig",
+        license = "MIT",
+        attribution = "GTCRN (Xiaobin-Rong/gtcrn), ONNX-Export von k2-fsa/sherpa-onnx",
+        required = false,
+    )
+
+    /** Experimentell: Systemerkennung des Geräts (keine Dateien, siehe [AsrEngine.AndroidSystem]). */
+    val ANDROID_SYSTEM = ModelSpec(
+        id = "android-on-device",
+        displayName = "Systemerkennung des Geräts (experimentell)",
+        kind = ModelKind.Asr,
+        files = emptyList(),
+        description = "Nutzt die eingebaute Offline-Spracherkennung von Android (z. B. Google), ab Android 13. " +
+            "Qualität und Verfügbarkeit hängen vom Gerät ab; das Sprachpaket wird vom System verwaltet.",
+        languages = "abhängig vom installierten Sprachpaket (hier: Deutsch)",
+        license = "Systemkomponente des Geräts",
+        attribution = "Android SpeechRecognizer (On-Device)",
+        required = false,
+        asrEngine = AsrEngine.AndroidSystem,
+        language = "de-DE",
+    )
+
     /** Auswählbare Spracherkennungsmodelle, Empfehlung zuerst. */
-    val asrModels: List<ModelSpec> = listOf(DE_FASTCONFORMER, CANARY_180M_DE, PARAKEET_V3, WHISPER_SMALL)
+    val asrModels: List<ModelSpec> = listOf(DE_FASTCONFORMER, CANARY_180M_DE, PARAKEET_V3, WHISPER_SMALL, ANDROID_SYSTEM)
 
     /** Standard für neue Installationen. */
     val DEFAULT_ASR_ID: String = DE_FASTCONFORMER.id
 
-    val all: List<ModelSpec> = asrModels + listOf(SILERO_VAD, WESPEAKER_RESNET34)
+    val all: List<ModelSpec> = asrModels + listOf(SILERO_VAD, WESPEAKER_RESNET34, GTCRN_DENOISER)
 
     fun byId(id: String): ModelSpec? = all.firstOrNull { it.id == id }
 

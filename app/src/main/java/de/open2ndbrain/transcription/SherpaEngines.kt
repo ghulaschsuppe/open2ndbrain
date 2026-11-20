@@ -160,6 +160,8 @@ internal class SherpaRecognizer(private val modelDir: File, private val spec: Mo
                         language = lang
                         task = "transcribe"
                     }
+                    // Systemerkennung läuft nicht über sherpa-onnx (eigene Implementierung folgt, ML-Agent)
+                    AsrEngine.AndroidSystem -> throw ModelLoadException("Systemerkennung wird hier nicht über sherpa-onnx geladen")
                 }
                 tokens = file("tokens")
                 this.numThreads = numThreads

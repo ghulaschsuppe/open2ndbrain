@@ -95,6 +95,8 @@ data class TranscriberConfig(
     /** null → keine Sprechererkennung. */
     val speakerModelFile: File?,
     val numThreads: Int = 4,
+    /** Rauschfilter vor der Erkennung (nur für die ASR, nie für Sprecher-Embeddings); null = aus. */
+    val denoiserModelFile: File? = null,
     /** Welches ASR-Modell in [asrModelDir] liegt (Engine, Sprache) – aus [ModelCatalog.asrModels]. */
     val asrModel: ModelSpec = ModelCatalog.PARAKEET_V3,
 )

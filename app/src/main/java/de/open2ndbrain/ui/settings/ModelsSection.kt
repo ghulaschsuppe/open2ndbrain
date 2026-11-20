@@ -93,6 +93,7 @@ fun ModelRow(
                 ModelKind.Asr -> Icons.Filled.RecordVoiceOver
                 ModelKind.Vad -> Icons.Filled.GraphicEq
                 ModelKind.SpeakerEmbedding -> Icons.Filled.Groups
+                ModelKind.Denoiser -> Icons.Filled.GraphicEq
             },
             tint = if (installed) O2bTheme.extra.success else scheme.secondary,
         )
