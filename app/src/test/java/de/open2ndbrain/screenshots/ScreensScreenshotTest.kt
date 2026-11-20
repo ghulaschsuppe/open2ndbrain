@@ -198,12 +198,15 @@ class ScreensScreenshotTest {
     )
 
     @Test fun mikrofonTestEinleitung() = compose.snapshot("10-mikrofontest-1-einleitung", dark = true) {
-        MicTestContent(MicTestUi.Intro(MicSituation.Table, history), MicTestActions(), onBack = {})
+        MicTestContent(
+            MicTestUi.Intro(MicSituation.Table, history), MicTestActions(), onBack = {},
+            error = "Die Aufnahme war zu kurz – bitte den ganzen Text vorlesen.",
+        )
     }
 
     @Test fun mikrofonTestLesen() = compose.snapshot("10-mikrofontest-2-lesen", dark = false) {
         MicTestContent(
-            MicTestUi.Reading(androidx.compose.ui.res.stringResource(de.open2ndbrain.R.string.mictest_text), 14_000, 0.62f, true),
+            MicTestUi.Reading(androidx.compose.ui.res.stringResource(de.open2ndbrain.R.string.mic_test_text_1), 14_000, 0.62f, true),
             MicTestActions(), onBack = {},
         )
     }
@@ -234,6 +237,7 @@ class ScreensScreenshotTest {
                 openId = ModelCatalog.DE_FASTCONFORMER.id,
             ),
             MicTestActions(), onBack = {},
+            silenceCutHint = true,
         )
     }
 

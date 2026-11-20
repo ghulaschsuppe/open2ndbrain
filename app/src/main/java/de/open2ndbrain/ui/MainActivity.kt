@@ -201,6 +201,7 @@ private fun TabContent(
                 onModelsOpened = onModelsOpened,
                 openMicTest = openMicTest,
                 onMicTestOpened = onMicTestOpened,
+                onReturnFromMicTest = { onSelect(Tab.Now) },
             )
         }
     }

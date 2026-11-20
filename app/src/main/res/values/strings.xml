@@ -457,7 +457,11 @@ Namensnennung: %2$s</string>
     <string name="mictest_tip_3">Lies den Text einmal vor und tippe dann auf „Fertig“.</string>
     <string name="mictest_start">Test starten</string>
     <string name="mictest_read_hint">Lies diesen Text in normalem Tempo vor:</string>
-    <string name="mictest_text">Am Dienstag treffen wir uns um halb zehn im Büro in der Lindenstraße. Frau Schröder bringt die Unterlagen für das neue Projekt mit, und Jonas fragt noch einmal nach dem Budget von zwölftausend Euro. Danach fahre ich zum Bahnhof, kaufe Brötchen und rufe meine Schwester an, weil sie am Wochenende Geburtstag hat.</string>
+    <string name="mictest_error_title">Der Test hat nicht geklappt</string>
+    <string name="mictest_retry">Erneut versuchen</string>
+    <string name="mictest_silence_title">Teile der Aufnahme fehlen vermutlich</string>
+    <string name="mictest_silence_text">„Stille verwerfen“ hat leise Stellen weggeschnitten. Die Modelle konnten deshalb nicht alles hören – die Noten sind schlechter, als sie sein müssten.</string>
+    <string name="mictest_silence_tip">Tipp: etwas lauter oder näher am Handy lesen, oder „Stille verwerfen“ in den Einstellungen für den Test ausschalten.</string>
     <string name="mictest_done">Fertig</string>
     <string name="mictest_evaluating">Modelle hören zu …</string>
     <string name="mictest_evaluating_model">%1$s (%2$d von %3$d)</string>

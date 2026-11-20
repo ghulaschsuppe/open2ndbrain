@@ -89,9 +89,21 @@ fun SettingsScreen(
     onModelsOpened: () -> Unit = {},
     openMicTest: Boolean = false,
     onMicTestOpened: () -> Unit = {},
+    /** Zurück aus einem vom Jetzt-Tab geöffneten Mikrofon-Test (führt wieder dorthin). */
+    onReturnFromMicTest: () -> Unit = {},
     vm: SettingsViewModel = viewModel(),
 ) {
     var page by rememberSaveable { mutableStateOf(SettingsPage.Main) }
+    var micTestFromNow by rememberSaveable { mutableStateOf(false) }
+    fun leaveMicTest() {
+        if (micTestFromNow) {
+            micTestFromNow = false
+            page = SettingsPage.Main
+            onReturnFromMicTest()
+        } else {
+            page = SettingsPage.Models
+        }
+    }
     // Sprung aus dem Jetzt-Tab („Besseres Modell verfügbar“)
     LaunchedEffect(openModels) {
         if (openModels) {
@@ -102,14 +114,15 @@ fun SettingsScreen(
     LaunchedEffect(openMicTest) {
         if (openMicTest) {
             page = SettingsPage.MicTest
+            micTestFromNow = true
             onMicTestOpened()
         }
     }
-    BackHandler(enabled = page != SettingsPage.Main) { page = if (page == SettingsPage.MicTest) SettingsPage.Models else SettingsPage.Main }
+    BackHandler(enabled = page != SettingsPage.Main) { if (page == SettingsPage.MicTest) leaveMicTest() else page = SettingsPage.Main }
     when (page) {
         SettingsPage.Licenses -> LicensesScreen(onBack = { page = SettingsPage.Main }, modifier = modifier)
         SettingsPage.Models -> AsrModelsScreen(onBack = { page = SettingsPage.Main }, modifier = modifier, onMicTest = { page = SettingsPage.MicTest })
-        SettingsPage.MicTest -> de.open2ndbrain.ui.mictest.MicTestScreen(onBack = { page = SettingsPage.Models }, modifier = modifier)
+        SettingsPage.MicTest -> de.open2ndbrain.ui.mictest.MicTestScreen(onBack = ::leaveMicTest, modifier = modifier)
         SettingsPage.Main -> SettingsMain(modifier, vm, onOpen = { page = it })
     }
 }

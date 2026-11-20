@@ -14,9 +14,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 fun MicTestScreen(onBack: () -> Unit, modifier: Modifier = Modifier, vm: MicTestViewModel = viewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    val silenceCutHint by vm.silenceCutHint.collectAsStateWithLifecycle()
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.start()
     }
     val actions = remember(vm) { vm.actions(onStartFailed = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) }) }
-    MicTestContent(ui = ui, actions = actions, onBack = onBack, modifier = modifier)
+    MicTestContent(ui = ui, actions = actions, onBack = onBack, modifier = modifier, error = error, silenceCutHint = silenceCutHint)
 }

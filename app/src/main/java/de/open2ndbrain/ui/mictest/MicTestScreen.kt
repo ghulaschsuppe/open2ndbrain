@@ -35,6 +35,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Headset
@@ -174,7 +178,16 @@ object MicTestGrades {
 
 /** Mikrofon-Test: Erklärung → Vorlesen → Auswertung → Ergebnis. */
 @Composable
-fun MicTestContent(ui: MicTestUi, actions: MicTestActions, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun MicTestContent(
+    ui: MicTestUi,
+    actions: MicTestActions,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Fehlermeldung des letzten Versuchs (Fehlerkarte mit „Erneut versuchen“); null = keiner. */
+    error: String? = null,
+    /** „Stille verwerfen“ hat vermutlich Teile der Aufnahme abgeschnitten (Info-Karte im Ergebnis). */
+    silenceCutHint: Boolean = false,
+) {
     Column(modifier.fillMaxSize()) {
         DetailTopBar(stringResource(R.string.mictest_title), onBack = onBack, subtitle = stringResource(R.string.mictest_subtitle))
         AnimatedContent(
@@ -185,10 +198,10 @@ fun MicTestContent(ui: MicTestUi, actions: MicTestActions, onBack: () -> Unit, m
             modifier = Modifier.weight(1f),
         ) { s ->
             when (s) {
-                is MicTestUi.Intro -> IntroStep(s, actions)
+                is MicTestUi.Intro -> IntroStep(s, actions, error)
                 is MicTestUi.Reading -> ReadingStep(s, actions)
                 is MicTestUi.Evaluating -> EvaluatingStep(s, actions)
-                is MicTestUi.Result -> ResultStep(s, actions)
+                is MicTestUi.Result -> ResultStep(s, actions, silenceCutHint)
             }
         }
     }
@@ -219,7 +232,7 @@ private fun StepColumn(bottom: @Composable ColumnScope.() -> Unit, content: @Com
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun IntroStep(s: MicTestUi.Intro, actions: MicTestActions) {
+private fun IntroStep(s: MicTestUi.Intro, actions: MicTestActions, error: String?) {
     StepColumn(bottom = {
         Button(onClick = actions.onStart, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
             Icon(Icons.Filled.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -227,6 +240,7 @@ private fun IntroStep(s: MicTestUi.Intro, actions: MicTestActions) {
             Text(stringResource(R.string.mictest_start))
         }
     }) {
+        if (error != null) ErrorCard(error, onRetry = actions.onStart)
         SpotIllustration(Illustration.Microphone, Modifier.size(150.dp).align(Alignment.CenterHorizontally))
         Text(stringResource(R.string.mictest_intro_title), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.mictest_intro_text), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -350,7 +364,7 @@ private fun EvaluatingStep(s: MicTestUi.Evaluating, actions: MicTestActions) {
 }
 
 @Composable
-private fun ResultStep(s: MicTestUi.Result, actions: MicTestActions) {
+private fun ResultStep(s: MicTestUi.Result, actions: MicTestActions, silenceCutHint: Boolean) {
     val sorted = s.results.sortedBy { it.werPct }
     WidthAware(Modifier.fillMaxSize()) { side ->
         LazyColumn(
@@ -368,6 +382,7 @@ private fun ResultStep(s: MicTestUi.Result, actions: MicTestActions) {
                     )
                 }
             }
+            if (silenceCutHint) item(key = "silence") { SilenceCutCard() }
             items(sorted, key = { it.spec.id }) { r ->
                 ResultCard(r, best = r.spec.id == s.bestId, initiallyOpen = r.spec.id == s.openId, onActivate = { actions.onActivate(r.spec.id) })
             }
@@ -552,6 +567,61 @@ private fun GradeChip(grade: Int) {
             .background(color.copy(alpha = 0.15f))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     )
+}
+
+/** Fehlerkarte: was schiefging, und „Erneut versuchen“. */
+@Composable
+private fun ErrorCard(message: String, onRetry: () -> Unit) {
+    O2bCard(
+        Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        border = null,
+    ) {
+        Row(verticalAlignment = Alignment.Top, modifier = Modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }) {
+            Icon(Icons.Filled.ErrorOutline, contentDescription = null)
+            Spacer(Modifier.width(Spacing.sm))
+            Column(Modifier.weight(1f)) {
+                Text(stringResource(R.string.mictest_error_title), style = MaterialTheme.typography.titleSmall)
+                Text(message, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onRetry) {
+                Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onErrorContainer)
+                Spacer(Modifier.width(Spacing.xs))
+                Text(stringResource(R.string.mictest_retry), color = MaterialTheme.colorScheme.onErrorContainer)
+            }
+        }
+    }
+}
+
+/** Dezenter Hinweis: „Stille verwerfen“ hat Teile abgeschnitten – mit Tipp. */
+@Composable
+private fun SilenceCutCard() {
+    O2bCard(
+        Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+        border = null,
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(Icons.Filled.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(Spacing.sm))
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(stringResource(R.string.mictest_silence_title), style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(R.string.mictest_silence_text), style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Filled.Lightbulb, contentDescription = null, tint = O2bTheme.extra.meeting, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(Spacing.xxs))
+                    Text(
+                        stringResource(R.string.mictest_silence_tip),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** Einstiegskarte „Welches Modell passt zu dir?“ (Jetzt-Tab und Spracherkennungs-Seite). */
