@@ -60,7 +60,12 @@ internal class TranscriptionPipeline(
     private val speakers: SpeakerMatcher?,
     /** Lautstärkenormalisierung auch vor dem Embedding (im Integrationstest geprüft). */
     private val normalizeForEmbeddings: Boolean = false,
+    /** Optionale Vorstufe vor der ASR (z. B. Rauschfilter); nie vor den Embeddings. */
+    private val asrPreprocessor: AudioPreprocessor? = null,
 ) {
+    /** Audio für die Erkennung: Vorstufe (falls an), dann Lautstärkenormalisierung. */
+    private fun forAsr(data: FloatArray): FloatArray = Loudness.normalize(asrPreprocessor?.process(data) ?: data)
+
     private class StopReading : RuntimeException() {
         override fun fillInStackTrace(): Throwable = this
     }
@@ -118,7 +123,7 @@ internal class TranscriptionPipeline(
             embedIdx.forEach { items += fine[it] to Tag.Speaker(it) }
             collect(source, items, progress, PASS1_SHARE, 1f) { tag, range, data ->
                 when (tag) {
-                    Tag.Block -> recognizer.recognize(Loudness.normalize(data)).forEach { t -> tokens += t.toAsrToken(range.start) }
+                    Tag.Block -> recognizer.recognize(forAsr(data)).forEach { t -> tokens += t.toAsrToken(range.start) }
                     is Tag.Speaker -> onEmbed(tag.index, data)
                 }
             }
@@ -136,7 +141,7 @@ internal class TranscriptionPipeline(
             // --- Durchlauf 3: ASR je Einheit (feine Abschnitte gleichen Sprechers, ≤ 15 s)
             val units = UnitPlanner.plan(fine, segIds.toList(), total)
             collect(source, units.map { it.padded to it }, progress, asrFrom, 1f) { unit, range, data ->
-                val text = recognizer.recognize(Loudness.normalize(data)).joinToString(" ") { it.text }
+                val text = recognizer.recognize(forAsr(data)).joinToString(" ") { it.text }
                 tokens += UnitPlanner.wordTokens(text, unit.speech.start, minOf(unit.speech.end, range.end))
             }
         }

@@ -1,7 +1,9 @@
 package de.open2ndbrain.transcription
 
 import android.content.Context
+import android.os.Build
 import android.util.Log
+import de.open2ndbrain.core.AsrEngine
 import de.open2ndbrain.core.ModelCatalog
 import de.open2ndbrain.core.ModelLoadException
 import de.open2ndbrain.core.RecordingFile
@@ -26,12 +28,13 @@ import java.io.IOException
  * - Sprecherprofile werden erst geändert, nachdem das Transkript geschrieben ist (idempotent je Datei).
  */
 class SherpaTranscriber(
-    @Suppress("unused") private val context: Context,
+    private val context: Context,
     private val config: TranscriberConfig,
     private val speakers: SpeakerRepository,
 ) : Transcriber {
 
-    private var recognizer: SherpaRecognizer? = null
+    private var recognizer: Recognizer? = null
+    private var denoiser: SherpaDenoiser? = null
     private var embedder: SherpaEmbedder? = null
     private var closed = false
 
@@ -60,6 +63,7 @@ class SherpaTranscriber(
                 null
             },
             embedder = emb,
+            asrPreprocessor = denoiser,
             speakers = matcher,
         )
         val expected = msToSamples(recording.durationMs.takeIf { it > 0 } ?: 3_600_000L)
@@ -123,7 +127,8 @@ class SherpaTranscriber(
         val t0 = System.currentTimeMillis()
         try {
             requireModelFile(config.vadModelFile)
-            recognizer = SherpaRecognizer(config.asrModelDir, config.asrModel, config.numThreads.coerceIn(1, 8))
+            recognizer = createRecognizer()
+            denoiser = config.denoiserModelFile?.let { SherpaDenoiser(it, config.numThreads.coerceIn(1, 4)) }
             embedder = config.speakerModelFile?.let { SherpaEmbedder(it, config.numThreads.coerceIn(1, 4)) }
         } catch (e: Throwable) {
             releaseModels()
@@ -132,8 +137,28 @@ class SherpaTranscriber(
         Log.i(TAG, "Modelle geladen in ${System.currentTimeMillis() - t0} ms (Sprecher: ${embedder != null})")
     }
 
+    /** sherpa-onnx-Modell bzw. (experimentell) die On-Device-Systemerkennung. */
+    private fun createRecognizer(): Recognizer = when (config.asrModel.asrEngine) {
+        AsrEngine.AndroidSystem -> {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                throw ModelLoadException("Systemerkennung mit Audiodateien erst ab Android 13")
+            }
+            AndroidSystemRecognizer(context, systemLanguage(config.asrModel.language))
+        }
+        else -> SherpaRecognizer(config.asrModelDir, config.asrModel, config.numThreads.coerceIn(1, 8))
+    }
+
+    private fun systemLanguage(lang: String?): String = when {
+        lang == null -> SystemRecognizerSupport.DEFAULT_LANGUAGE
+        lang.contains('-') -> lang
+        lang == "de" -> "de-DE"
+        else -> lang
+    }
+
     private fun releaseModels() {
-        runCatching { recognizer?.close() }
+        runCatching { (recognizer as? AutoCloseable)?.close() }
+        runCatching { denoiser?.close() }
+        denoiser = null
         runCatching { embedder?.close() }
         recognizer = null
         embedder = null
