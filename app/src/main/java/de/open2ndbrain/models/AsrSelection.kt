@@ -10,7 +10,7 @@ object AsrSelection {
 
     /** Empfohlene Erstausstattung: Standard-ASR + Pflichtmodelle (VAD) + Sprechererkennung. */
     val RECOMMENDED: List<ModelSpec>
-        get() = listOfNotNull(ModelCatalog.byId(ModelCatalog.DEFAULT_ASR_ID)) + ModelCatalog.all.filter { it.kind != ModelKind.Asr }
+        get() = listOfNotNull(ModelCatalog.byId(ModelCatalog.DEFAULT_ASR_ID)) + ModelCatalog.all.filter { it.kind == ModelKind.Vad || it.kind == ModelKind.SpeakerEmbedding }
 
     val RECOMMENDED_BYTES: Long get() = RECOMMENDED.sumOf { it.sizeBytes }
 
