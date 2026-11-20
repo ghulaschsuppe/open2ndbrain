@@ -59,6 +59,9 @@ class SherpaIntegrationTest {
             ModelCatalog.WHISPER_SMALL.id to "whisper-small",
         ).getValue(asr.id))
         val normEmb = System.getenv("O2B_NORM_EMB") == "1"
+        // optional: Rauschfilter vor der ASR (O2B_DENOISE=1, Modell unter models/denoise/gtcrn_simple.onnx)
+        val denoiser = if (System.getenv("O2B_DENOISE") == "1") SherpaDenoiser(File(models, "denoise/gtcrn_simple.onnx"), 4) else null
+        println("Rauschfilter: ${denoiser != null}")
         println("ASR-Modell: ${asr.id} (Zeitstempel: ${asr.asrEngine?.hasTokenTimestamps}), Normalisierung Embeddings: $normEmb")
         SherpaRecognizer(asrDir, asr, 4).use { rec ->
             SherpaEmbedder(File(models, "wespeaker_en_voxceleb_resnet34.onnx"), 4).use { emb ->
@@ -69,6 +72,7 @@ class SherpaIntegrationTest {
                     embedder = emb,
                     speakers = repo,
                     normalizeForEmbeddings = normEmb,
+                    asrPreprocessor = denoiser,
                 )
                 // Runde 1: neue Profile; Runde 2/3: Wiedererkennung über Dateien, keine neuen Profile
                 var profilesAfterFirst = 0
